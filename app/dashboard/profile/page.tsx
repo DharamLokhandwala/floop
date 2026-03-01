@@ -54,7 +54,7 @@ export default async function ProfilePage() {
                 <p className="font-medium">{user.email}</p>
               </div>
             </div>
-            <ProfileForm defaultName={user.name ?? ""} defaultEmail={user.email} />
+            <ProfileForm defaultName={user.name ?? ""} defaultEmail={user.email ?? ""} />
           </section>
 
           <section className="space-y-4">
