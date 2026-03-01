@@ -33,18 +33,19 @@ export const authOptions: NextAuthOptions = {
       sendVerificationRequest: async ({ identifier: email, url }) => {
         if (!process.env.RESEND_API_KEY) {
           console.error("RESEND_API_KEY is not set");
-          return;
+          throw new Error("Email is not configured. Please set RESEND_API_KEY.");
         }
-        try {
-          await resend.emails.send({
-            from: fromEmail,
-            to: email,
-            subject: "Sign in to your account",
-            html: `<p>Click the link below to sign in:</p><p><a href="${url}">${url}</a></p><p>This link expires in 24 hours.</p>`,
-          });
-        } catch (err) {
-          console.error("Failed to send verification email:", err);
-          throw new Error("Failed to send sign-in email");
+        const { data, error } = await resend.emails.send({
+          from: fromEmail,
+          to: email,
+          subject: "Sign in to your account",
+          html: `<p>Click the link below to sign in:</p><p><a href="${url}">${url}</a></p><p>This link expires in 24 hours.</p>`,
+        });
+        if (error) {
+          console.error("Resend send failed:", error);
+          throw new Error(
+            error.message ?? "Failed to send sign-in email. Try again later."
+          );
         }
       },
     }),
