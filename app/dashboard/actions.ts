@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/lib/auth";
 
 export type ProfileState = { error?: string; success?: string };
 export type NotificationsState = { error?: string; success?: string };
+export type PasswordState = { error?: string; success?: string };
 
 export async function updateProfile(
   _prev: ProfileState,
@@ -62,6 +63,16 @@ export async function updateNotificationSettings(
 
   revalidatePath("/dashboard/settings");
   return { success: "Notification settings updated" };
+}
+
+export async function changePassword(
+  _prev: PasswordState,
+  _formData: FormData
+): Promise<PasswordState> {
+  return {
+    error:
+      "Password change is not available when signing in with email link. Use your email to sign in.",
+  };
 }
 
 export async function deleteAccount(): Promise<never> {

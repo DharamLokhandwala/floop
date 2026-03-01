@@ -23,7 +23,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const fromEmail = process.env.RESEND_FROM ?? "onboarding@resend.dev";
 
 export const authOptions: NextAuthOptions = {
-  trustHost: true,
+  ...({ trustHost: true } as Partial<NextAuthOptions>),
   secret: nextAuthSecret,
   adapter: PrismaAdapter(prisma),
   providers: [
