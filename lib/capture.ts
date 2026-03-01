@@ -1,7 +1,7 @@
 "use server";
 
 import { chromium as playwrightChromium } from "playwright-core";
-import chromium from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium-min";
 import { put } from "@vercel/blob";
 import { v4 } from "uuid";
 
@@ -52,7 +52,11 @@ async function captureScreenshotWithViewport(
 
   if (isVercel) {
     chromium.setGraphicsMode = false; // recommended for serverless (faster cold start)
-    launchOptions.executablePath = await chromium.executablePath();
+    // chromium-min has no bundled binary; pass pack URL so it downloads to /tmp at runtime
+    const chromiumPackUrl =
+      process.env.CHROMIUM_PACK_URL ??
+      "https://github.com/Sparticuz/chromium/releases/download/v143.0.4/chromium-v143.0.4-pack.x64.tar";
+    launchOptions.executablePath = await chromium.executablePath(chromiumPackUrl);
     launchOptions.args = chromium.args;
   }
 
