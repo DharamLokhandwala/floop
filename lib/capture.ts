@@ -1,12 +1,15 @@
 "use server";
 
-import { chromium } from "playwright-core";
+import { chromium as playwrightChromium } from "playwright-core";
+import chromium from "@sparticuz/chromium";
 import { put } from "@vercel/blob";
 import { v4 } from "uuid";
 
 const NAVIGATION_TIMEOUT_MS = 45000;
 const NETWORK_IDLE_TIMEOUT_MS = 8000;
 const PAGE_SETTLE_MS = 2500;
+
+const isVercel = typeof process.env.VERCEL === "string";
 
 type Viewport = { width: number; height: number };
 
@@ -34,7 +37,7 @@ async function captureScreenshotWithViewport(
   viewport: Viewport,
   fullPage: boolean
 ): Promise<Buffer> {
-  const browser = await chromium.launch({
+  const launchOptions: Parameters<typeof playwrightChromium.launch>[0] = {
     headless: true,
     args: [
       "--no-sandbox",
@@ -45,7 +48,15 @@ async function captureScreenshotWithViewport(
       "--disable-accelerated-2d-canvas",
       "--disable-gpu",
     ],
-  });
+  };
+
+  if (isVercel) {
+    chromium.setGraphicsMode = false; // recommended for serverless (faster cold start)
+    launchOptions.executablePath = await chromium.executablePath();
+    launchOptions.args = chromium.args;
+  }
+
+  const browser = await playwrightChromium.launch(launchOptions);
 
   try {
     const context = await browser.newContext({
