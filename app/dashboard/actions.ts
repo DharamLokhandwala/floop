@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { getCurrentUser, hashPassword } from "@/lib/auth";
+import { getCurrentUser, hashPassword, verifyPassword } from "@/lib/auth";
 
 export type ProfileState = { error?: string; success?: string };
 export type NotificationsState = { error?: string; success?: string };
@@ -97,6 +97,42 @@ export async function setPassword(
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/set-password");
   redirect("/dashboard?password-set=1");
+}
+
+export async function changePassword(
+  _prev: PasswordState,
+  formData: FormData
+): Promise<PasswordState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
+  if (!user.passwordHash) {
+    return { error: "You don't have a password set yet. Use the set-password page first." };
+  }
+
+  const currentPassword = (formData.get("currentPassword") as string) ?? "";
+  const newPassword = (formData.get("newPassword") as string)?.trim() ?? "";
+  const confirmPassword = (formData.get("confirmPassword") as string)?.trim() ?? "";
+
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
+  if (!valid) {
+    return { error: "Current password is incorrect." };
+  }
+  if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    return { error: `New password must be at least ${MIN_PASSWORD_LENGTH} characters.` };
+  }
+  if (newPassword !== confirmPassword) {
+    return { error: "New passwords do not match." };
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash },
+  });
+
+  revalidatePath("/dashboard/settings");
+  return { success: "Password updated." };
 }
 
 export async function deleteAccount(): Promise<never> {
