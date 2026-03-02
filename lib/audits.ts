@@ -26,7 +26,9 @@ export async function createAudit(input: CreateAuditInput) {
       goal: input.goal,
       screenshotUrl: input.screenshotUrl,
       pinsJson: JSON.stringify(input.pins),
-      createdById: input.createdById ?? null,
+      ...(input.createdById != null && input.createdById !== ""
+        ? { creator: { connect: { id: input.createdById } } }
+        : {}),
     },
   });
 }
