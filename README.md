@@ -77,9 +77,11 @@ For production (e.g. Vercel), use [Turso](https://turso.tech) instead of local S
    turso db shell <your-db-name> < prisma/migrations/20260228185329_add_archived/migration.sql
    turso db shell <your-db-name> < prisma/migrations/20260228194449_add_user/migration.sql
    turso db shell <your-db-name> < prisma/migrations/20260228202720_add_nextauth_models/migration.sql
+   turso db shell <your-db-name> < prisma/migrations/20260301171757_add_audit_ownership_and_sharing/migration.sql
+   turso db shell <your-db-name> < prisma/migrations/20260302120000_add_last_seen_user_pins_count/migration.sql
    ```
 
-   Replace `<your-db-name>` with your Turso database name. If a migration fails (e.g. table already exists), skip that one or fix the SQL for Turso.
+   Replace `<your-db-name>` with your Turso database name. If a migration fails (e.g. table already exists), skip that one or fix the SQL for Turso. When using the Turso web app SQL runner, run each migration file’s contents as a **single script** (paste and execute all statements together), especially `20260301171757_add_audit_ownership_and_sharing`, which redefines the `Audit` table.
 
 5. Do **not** set `DATABASE_URL` in production when using Turso; the app uses the Turso adapter when `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are set.
 

@@ -95,9 +95,12 @@ export type AuditListItem = {
 export type SharedAuditListItem = AuditListItem & { newCommentsCount: number };
 
 export async function archiveAudit(id: string, userId: string) {
-  const audit = await prisma.audit.findUnique({ where: { id } });
+  const audit = await prisma.audit.findUnique({
+    where: { id },
+    select: { createdById: true },
+  });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById && audit.createdById !== userId) {
+  if (audit.createdById != null && audit.createdById !== userId) {
     throw new Error("Only the owner can archive this audit");
   }
   await prisma.audit.update({
@@ -107,9 +110,12 @@ export async function archiveAudit(id: string, userId: string) {
 }
 
 export async function unarchiveAudit(id: string, userId: string) {
-  const audit = await prisma.audit.findUnique({ where: { id } });
+  const audit = await prisma.audit.findUnique({
+    where: { id },
+    select: { createdById: true },
+  });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById && audit.createdById !== userId) {
+  if (audit.createdById != null && audit.createdById !== userId) {
     throw new Error("Only the owner can restore this audit");
   }
   await prisma.audit.update({
@@ -119,9 +125,12 @@ export async function unarchiveAudit(id: string, userId: string) {
 }
 
 export async function deleteAudit(id: string, userId: string) {
-  const audit = await prisma.audit.findUnique({ where: { id } });
+  const audit = await prisma.audit.findUnique({
+    where: { id },
+    select: { createdById: true },
+  });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById && audit.createdById !== userId) {
+  if (audit.createdById != null && audit.createdById !== userId) {
     throw new Error("Only the owner can delete this audit");
   }
   await prisma.audit.delete({
@@ -204,9 +213,12 @@ export async function getSharedWithMeCount(userId: string): Promise<number> {
 }
 
 export async function setShareVisibility(auditId: string, visibility: "public" | "private", userId: string) {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    select: { createdById: true },
+  });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById && audit.createdById !== userId) {
+  if (audit.createdById != null && audit.createdById !== userId) {
     throw new Error("Only the owner can change share settings");
   }
   await prisma.audit.update({
@@ -216,9 +228,12 @@ export async function setShareVisibility(auditId: string, visibility: "public" |
 }
 
 export async function shareAuditWithEmail(auditId: string, email: string, sharedById: string) {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    select: { createdById: true },
+  });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById && audit.createdById !== sharedById) {
+  if (audit.createdById != null && audit.createdById !== sharedById) {
     throw new Error("Only the owner can share this audit");
   }
   const normalizedEmail = email.trim().toLowerCase();
@@ -244,7 +259,10 @@ export async function shareAuditWithEmail(auditId: string, email: string, shared
 }
 
 export async function canViewAudit(auditId: string, userId: string | null): Promise<boolean> {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    select: { shareVisibility: true, createdById: true },
+  });
   if (!audit) return false;
   if (!userId) return false; // require sign-in to view any shared feedback
   if (audit.shareVisibility === "public") return true;
@@ -258,7 +276,10 @@ export async function canViewAudit(auditId: string, userId: string | null): Prom
 
 /** When a signed-in user views a public audit they don't own, add it to their "Shared with me" so it appears on the dashboard. */
 export async function addPublicAuditToSharedWithMe(auditId: string, userId: string) {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    select: { shareVisibility: true, createdById: true },
+  });
   if (!audit || audit.shareVisibility !== "public" || audit.createdById === userId) return;
   if (!audit.createdById) return; // no owner to attribute share to
   await prisma.auditShare.upsert({
