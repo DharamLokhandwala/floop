@@ -17,11 +17,11 @@ export default async function LoginPage({
   if (params.fromAuditId) {
     const audit = await prisma.audit.findUnique({
       where: { id: params.fromAuditId },
-      select: { createdById: true },
     });
-    if (audit?.createdById) {
+    const createdById = audit ? (audit as { createdById?: string | null }).createdById : null;
+    if (createdById) {
       const creator = await prisma.user.findUnique({
-        where: { id: audit.createdById },
+        where: { id: createdById },
         select: { name: true, email: true },
       });
       if (creator) sharedByName = creator.name || creator.email || null;
