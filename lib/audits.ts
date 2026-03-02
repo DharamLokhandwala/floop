@@ -2,6 +2,9 @@ import { prisma } from "./db";
 import type { Pin } from "@/types/audit";
 import type { Audit as PrismaAudit } from "@prisma/client";
 
+/** Used when reading createdById/shareVisibility so code works even if Prisma client types omit them (e.g. on Vercel). */
+type AuditOwnerFields = { createdById?: string | null; shareVisibility?: string | null };
+
 export type AuditWithPins = Omit<PrismaAudit, "pinsJson" | "userPinsJson"> & {
   pins: Pin[];
   userPins: Pin[];
@@ -95,12 +98,10 @@ export type AuditListItem = {
 export type SharedAuditListItem = AuditListItem & { newCommentsCount: number };
 
 export async function archiveAudit(id: string, userId: string) {
-  const audit = await prisma.audit.findUnique({
-    where: { id },
-    select: { createdById: true },
-  });
+  const audit = await prisma.audit.findUnique({ where: { id } });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById != null && audit.createdById !== userId) {
+  const createdById = (audit as AuditOwnerFields).createdById;
+  if (createdById != null && createdById !== userId) {
     throw new Error("Only the owner can archive this audit");
   }
   await prisma.audit.update({
@@ -110,12 +111,10 @@ export async function archiveAudit(id: string, userId: string) {
 }
 
 export async function unarchiveAudit(id: string, userId: string) {
-  const audit = await prisma.audit.findUnique({
-    where: { id },
-    select: { createdById: true },
-  });
+  const audit = await prisma.audit.findUnique({ where: { id } });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById != null && audit.createdById !== userId) {
+  const createdById = (audit as AuditOwnerFields).createdById;
+  if (createdById != null && createdById !== userId) {
     throw new Error("Only the owner can restore this audit");
   }
   await prisma.audit.update({
@@ -125,12 +124,10 @@ export async function unarchiveAudit(id: string, userId: string) {
 }
 
 export async function deleteAudit(id: string, userId: string) {
-  const audit = await prisma.audit.findUnique({
-    where: { id },
-    select: { createdById: true },
-  });
+  const audit = await prisma.audit.findUnique({ where: { id } });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById != null && audit.createdById !== userId) {
+  const createdById = (audit as AuditOwnerFields).createdById;
+  if (createdById != null && createdById !== userId) {
     throw new Error("Only the owner can delete this audit");
   }
   await prisma.audit.delete({
@@ -213,12 +210,10 @@ export async function getSharedWithMeCount(userId: string): Promise<number> {
 }
 
 export async function setShareVisibility(auditId: string, visibility: "public" | "private", userId: string) {
-  const audit = await prisma.audit.findUnique({
-    where: { id: auditId },
-    select: { createdById: true },
-  });
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById != null && audit.createdById !== userId) {
+  const createdById = (audit as AuditOwnerFields).createdById;
+  if (createdById != null && createdById !== userId) {
     throw new Error("Only the owner can change share settings");
   }
   await prisma.audit.update({
@@ -228,12 +223,10 @@ export async function setShareVisibility(auditId: string, visibility: "public" |
 }
 
 export async function shareAuditWithEmail(auditId: string, email: string, sharedById: string) {
-  const audit = await prisma.audit.findUnique({
-    where: { id: auditId },
-    select: { createdById: true },
-  });
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
   if (!audit) throw new Error("Audit not found");
-  if (audit.createdById != null && audit.createdById !== sharedById) {
+  const createdById = (audit as AuditOwnerFields).createdById;
+  if (createdById != null && createdById !== sharedById) {
     throw new Error("Only the owner can share this audit");
   }
   const normalizedEmail = email.trim().toLowerCase();
@@ -259,15 +252,13 @@ export async function shareAuditWithEmail(auditId: string, email: string, shared
 }
 
 export async function canViewAudit(auditId: string, userId: string | null): Promise<boolean> {
-  const audit = await prisma.audit.findUnique({
-    where: { id: auditId },
-    select: { shareVisibility: true, createdById: true },
-  });
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
   if (!audit) return false;
   if (!userId) return false; // require sign-in to view any shared feedback
-  if (audit.shareVisibility === "public") return true;
-  if (!audit.createdById) return true; // legacy audits without owner: allow all
-  if (audit.createdById === userId) return true;
+  const row = audit as AuditOwnerFields;
+  if (row.shareVisibility === "public") return true;
+  if (!row.createdById) return true; // legacy audits without owner: allow all
+  if (row.createdById === userId) return true;
   const share = await prisma.auditShare.findUnique({
     where: { auditId_sharedWithUserId: { auditId, sharedWithUserId: userId } },
   });
@@ -276,15 +267,13 @@ export async function canViewAudit(auditId: string, userId: string | null): Prom
 
 /** When a signed-in user views a public audit they don't own, add it to their "Shared with me" so it appears on the dashboard. */
 export async function addPublicAuditToSharedWithMe(auditId: string, userId: string) {
-  const audit = await prisma.audit.findUnique({
-    where: { id: auditId },
-    select: { shareVisibility: true, createdById: true },
-  });
-  if (!audit || audit.shareVisibility !== "public" || audit.createdById === userId) return;
-  if (!audit.createdById) return; // no owner to attribute share to
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  const row = audit as AuditOwnerFields | undefined;
+  if (!audit || row?.shareVisibility !== "public" || row?.createdById === userId) return;
+  if (!row?.createdById) return; // no owner to attribute share to
   await prisma.auditShare.upsert({
     where: { auditId_sharedWithUserId: { auditId, sharedWithUserId: userId } },
-    create: { auditId, sharedWithUserId: userId, sharedById: audit.createdById },
+    create: { auditId, sharedWithUserId: userId, sharedById: row.createdById },
     update: {},
   });
 }
