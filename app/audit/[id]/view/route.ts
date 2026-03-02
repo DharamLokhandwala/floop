@@ -345,16 +345,41 @@ function getHistoryShimScript(
     }catch(e){return s;}
   }
 
+  function notifyParentPageUrl(url) {
+    if (window.parent === window) return;
+    try {
+      var parsed;
+      try { parsed = new URL(String(url)); } catch(e2) { parsed = new URL(String(url), window.location.origin); }
+      var pathParam = parsed.searchParams ? parsed.searchParams.get('path') : null;
+      var pageUrl;
+      if (pathParam) {
+        pageUrl = origin + (pathParam.charAt(0) === '/' ? pathParam : '/' + pathParam);
+      } else if (parsed.origin === origin) {
+        pageUrl = parsed.href;
+      } else {
+        var p = parsed.pathname + (parsed.search || '');
+        pageUrl = origin + (p.charAt(0) === '/' ? p : '/' + p);
+      }
+      if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pageUrl = pageUrl;
+      window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
+    } catch (e) {}
+  }
+
   var _replace=history.replaceState;
   var _push=history.pushState;
   history.replaceState=function(st,t,url){
-    try{return _replace.call(this,st,t,rewrite(url));}
-    catch(e){try{return _replace.call(this,st,t);}catch(e2){}}
+    var rewritten = url ? (function(){ try { return rewrite(url); } catch(e) { return url; } })() : url;
+    try { _replace.call(this,st,t,rewritten); } catch(e){ try{ _replace.call(this,st,t); } catch(e2){} }
+    if (rewritten) notifyParentPageUrl(rewritten);
   };
   history.pushState=function(st,t,url){
-    try{return _push.call(this,st,t,rewrite(url));}
-    catch(e){try{return _push.call(this,st,t);}catch(e2){}}
+    var rewritten = url ? (function(){ try { return rewrite(url); } catch(e) { return url; } })() : url;
+    try { _push.call(this,st,t,rewritten); } catch(e){ try{ _push.call(this,st,t); } catch(e2){} }
+    if (rewritten) notifyParentPageUrl(rewritten);
   };
+  window.addEventListener('popstate', function() {
+    try { notifyParentPageUrl(window.location.href); } catch (e) {}
+  });
 
   // Intercept window.location assignments that some SPAs use
   var _fetch=window.fetch;
@@ -435,7 +460,10 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     var nudges = [[28,0],[0,28],[-28,0],[0,-28],[28,28],[-28,28],[-28,-28],[28,-28],[56,0],[0,56],[-56,0],[0,-56]];
     pins.forEach(function(pin, i) {
       var leftPx, topPx;
-      if (pin.selector) {
+      if (typeof pin.docX === 'number' && typeof pin.docY === 'number') {
+        leftPx = pin.docX;
+        topPx = pin.docY;
+      } else if (pin.selector) {
         try {
           var target = document.querySelector(pin.selector);
           if (target) {
@@ -562,12 +590,15 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     var vw = window.innerWidth, vh = window.innerHeight;
     var x = (e.clientX / vw) * 100;
     var y = (e.clientY / vh) * 100;
+    var docX = typeof e.pageX === 'number' ? e.pageX : (window.scrollX + e.clientX);
+    var docY = typeof e.pageY === 'number' ? e.pageY : (window.scrollY + e.clientY);
     var selector = getSelector(target);
     if (window.parent !== window) {
       window.parent.postMessage({
         type: 'AUDIT_VIEWER_CLICK',
         selector: selector,
         x: x, y: y,
+        docX: docX, docY: docY,
         pageUrl: window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl ? window.__AUDIT_VIEWER__.pageUrl : window.location.href,
         viewportWidth: vw,
         viewportHeight: vh,

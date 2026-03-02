@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { signOut } from "next-auth/react";
 import { MoreVertical, User, Settings, Archive, LogOut } from "lucide-react";
-import { logout } from "@/app/auth/actions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,15 +39,14 @@ export function DashboardNavActions() {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <form action={logout} className="contents">
-            <button
-              type="submit"
-              className="relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-            >
-              <LogOut className="size-4" />
-              Log out
-            </button>
-          </form>
+          <button
+            type="button"
+            className="relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+            onClick={() => signOut({ callbackUrl: "/login" })}
+          >
+            <LogOut className="size-4" />
+            Log out
+          </button>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

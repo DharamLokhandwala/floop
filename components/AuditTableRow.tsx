@@ -11,6 +11,8 @@ import { TableRow, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Archive, Trash2, ArchiveRestore } from "lucide-react";
 
+const PRIMARY_DOT = "#3a3cff";
+
 interface AuditTableRowProps {
   id: string;
   href: string;
@@ -20,6 +22,10 @@ interface AuditTableRowProps {
   goal: string;
   /** When true, show Restore instead of Archive (for archived list). */
   archived?: boolean;
+  /** When false, hide archive/delete (e.g. for shared-with-me audits). */
+  canEdit?: boolean;
+  /** When > 0, show "[X] new comments" with dot at the right end of the row (shared tab). */
+  newCommentsCount?: number;
 }
 
 export function AuditTableRow({
@@ -30,6 +36,8 @@ export function AuditTableRow({
   websiteUrl,
   goal,
   archived = false,
+  canEdit = true,
+  newCommentsCount = 0,
 }: AuditTableRowProps) {
   const router = useRouter();
   const [archiving, setArchiving] = useState(false);
@@ -106,6 +114,7 @@ export function AuditTableRow({
           <TableCell className="whitespace-normal break-words min-w-0 max-w-[14rem] overflow-hidden">
             <div className="flex items-center justify-between gap-2 w-full min-w-0">
               <span className="truncate min-w-0">{goal}</span>
+              {canEdit && (
               <div
                 className="flex items-center shrink-0 gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={(e) => e.stopPropagation()}
@@ -159,8 +168,21 @@ export function AuditTableRow({
                   <TooltipContent side="top">Delete</TooltipContent>
                 </Tooltip>
               </div>
+              )}
             </div>
           </TableCell>
+          {newCommentsCount > 0 && (
+            <TableCell className="text-right shrink-0 w-28">
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  className="rounded-full size-2 shrink-0"
+                  style={{ backgroundColor: PRIMARY_DOT }}
+                  aria-hidden
+                />
+                [{newCommentsCount}] new comments
+              </span>
+            </TableCell>
+          )}
         </TableRow>
       </TooltipTrigger>
       <TooltipContent

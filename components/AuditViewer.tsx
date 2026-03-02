@@ -49,12 +49,10 @@ export function AuditViewer({
   ];
 
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
-    if (!imageRef.current || !containerRef.current) return;
+    if (!imageRef.current) return;
 
     const rect = imageRef.current.getBoundingClientRect();
-    const containerRect = containerRef.current.getBoundingClientRect();
-    
-    // Calculate click position relative to image
+    // Position as percentage of image (0–100) so it matches the pin overlay, which is image-sized
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
@@ -116,17 +114,19 @@ export function AuditViewer({
       
       <div
         ref={containerRef}
-        className="relative w-full flex-1 min-h-0 overflow-auto rounded-lg border border-border shadow-lg bg-muted/20"
+        className="w-full flex-1 min-h-0 overflow-auto rounded-lg border border-border shadow-lg bg-muted/20"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          ref={imageRef}
-          src={screenshotUrl}
-          alt="Website screenshot"
-          className="w-full h-auto block cursor-crosshair"
-          onClick={handleImageClick}
-        />
-        <div className="absolute inset-0 pointer-events-none">
+        {/* Wrapper sizes to the image so the pin overlay matches image dimensions (fixes pin offset when image is scrollable) */}
+        <div className="relative inline-block w-full">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            ref={imageRef}
+            src={screenshotUrl}
+            alt="Website screenshot"
+            className="w-full h-auto block cursor-crosshair"
+            onClick={handleImageClick}
+          />
+          <div className="absolute inset-0 pointer-events-none">
           {allPins.map((pin) => (
             <div
               key={`${pin.isUserPin ? "user" : "ai"}-${pin.index}`}
@@ -167,6 +167,7 @@ export function AuditViewer({
               </Tooltip>
             </div>
           ))}
+          </div>
         </div>
       </div>
 

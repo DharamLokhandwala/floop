@@ -9,17 +9,20 @@ datasource db {
 }
 
 model User {
-  id                    String    @id @default(cuid())
+  id                    String       @id @default(cuid())
   name                  String?
-  email                 String?   @unique
+  email                 String?      @unique
   emailVerified         DateTime?
   image                 String?
   passwordHash          String?
-  notifyOnAuditComplete Boolean   @default(true)
-  notifyWeeklyDigest    Boolean   @default(false)
-  createdAt             DateTime  @default(now())
+  notifyOnAuditComplete Boolean      @default(true)
+  notifyWeeklyDigest    Boolean      @default(false)
+  createdAt             DateTime     @default(now())
   accounts              Account[]
   sessions              Session[]
+  createdAudits         Audit[]      @relation("AuditCreator")
+  sharedWithMe          AuditShare[] @relation("SharedWithUser")
+  sharedByMe            AuditShare[] @relation("SharedByUser")
 }
 
 model Account {
@@ -57,12 +60,29 @@ model VerificationToken {
 }
 
 model Audit {
-  id            String   @id
-  url           String
-  goal          String
-  screenshotUrl String
-  pinsJson      String
-  userPinsJson  String?  @default("[]")
-  archived      Boolean  @default(false)
-  createdAt     DateTime @default(now())
+  id              String       @id
+  url             String
+  goal            String
+  screenshotUrl   String
+  pinsJson        String
+  userPinsJson    String?      @default("[]")
+  archived        Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  createdById     String?
+  shareVisibility String       @default("private") // "public" | "private"
+  creator         User?        @relation("AuditCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  shares          AuditShare[]
+}
+
+model AuditShare {
+  id                    String   @id @default(cuid())
+  auditId               String
+  sharedWithUserId      String
+  sharedById            String
+  lastSeenUserPinsCount Int      @default(0)
+  createdAt             DateTime @default(now())
+  audit                 Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  sharedWith            User     @relation("SharedWithUser", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  sharedBy              User     @relation("SharedByUser", fields: [sharedById], references: [id], onDelete: Cascade)
+  @@unique([auditId, sharedWithUserId])
 }

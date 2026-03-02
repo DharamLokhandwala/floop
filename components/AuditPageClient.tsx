@@ -8,12 +8,14 @@ function getPagePath(pin: Pin): string {
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, MessageSquare, MousePointer } from "lucide-react";
+import { ArrowLeft, LinkIcon, MessageSquare, MousePointer } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LiveAuditView } from "@/components/LiveAuditView";
 import { FeedbackSidebar } from "@/components/FeedbackSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { ShareButton } from "@/app/audit/[id]/ShareButton";
+import { ShareModal } from "@/components/ShareModal";
+import { LoginForm } from "@/components/LoginForm";
 import type { Pin } from "@/types/audit";
 
 interface AuditPageClientProps {
@@ -24,6 +26,10 @@ interface AuditPageClientProps {
   pins: Pin[];
   userPins: Pin[];
   createdAt: Date;
+  shareVisibility: "public" | "private";
+  isOwner: boolean;
+  isAuthenticated?: boolean;
+  sharedByName?: string | null;
 }
 
 function buildAllPins(pins: Pin[], userPins: Pin[]): (Pin & { index: number })[] {
@@ -40,9 +46,14 @@ export function AuditPageClient({
   pins,
   userPins,
   createdAt,
+  shareVisibility,
+  isOwner,
+  isAuthenticated = true,
+  sharedByName,
 }: AuditPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [shareModalOpen, setShareModalOpen] = useState(false);
   const initialPath = searchParams.get("path") ?? "";
   const isSharedView = searchParams.get("view") === "shared";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -86,103 +97,142 @@ export function AuditPageClient({
     [auditId]
   );
 
+  const callbackUrl = `/audit/${auditId}?view=shared`;
+
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <header className="shrink-0 border-b border-border">
-        <div className="flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-4 py-2.5 sm:py-3">
-          {isSharedView ? (
-            <div className="w-10 shrink-0" aria-hidden />
-          ) : (
-            <Link
-              href="/dashboard"
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground shrink-0"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span className="font-medium text-primary">back</span>
-            </Link>
-          )}
-          <div className="flex-1 min-w-0 flex justify-center">
-            <button
-              type="button"
-              onClick={copyUrl}
-              className="text-xs sm:text-sm text-muted-foreground truncate max-w-[45vw] sm:max-w-[50vw] hover:text-foreground transition-colors cursor-pointer"
-              title={`Copy: ${url}`}
-            >
-              {url}
-            </button>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {!isSharedView && (
-              <div className="flex rounded-lg border border-border p-0.5 bg-muted/30">
-                <button
-                  type="button"
-                  onClick={() => setCommentMode(false)}
-                  className={cn(
-                    "flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors",
-                    !commentMode ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <MousePointer className="h-4 w-4" />
-                  Interact
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCommentMode(true)}
-                  className={cn(
-                    "flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors",
-                    commentMode ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  Comment
-                </button>
-              </div>
+    <div className="min-h-screen flex flex-col bg-background relative">
+      <div className={cn("flex-1 flex flex-col", !isAuthenticated && "blur-sm pointer-events-none select-none")}>
+        <header className="shrink-0 border-b border-border">
+          <div className="flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-4 py-2.5 sm:py-3">
+            {isSharedView ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/dashboard">Go to dashboard</Link>
+              </Button>
+            ) : (
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground shrink-0"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span className="font-medium text-primary">back</span>
+              </Link>
             )}
-            {isSharedView && (
+            <div className="flex-1 min-w-0 flex justify-center">
               <button
                 type="button"
-                onClick={() => setSidebarCollapsed((c) => !c)}
-                className="inline-flex items-center rounded-lg border border-border px-2.5 py-1.5 text-xs sm:text-sm font-medium text-foreground bg-background hover:bg-muted/50 transition-colors"
+                onClick={copyUrl}
+                className="text-xs sm:text-sm text-muted-foreground truncate max-w-[45vw] sm:max-w-[50vw] hover:text-foreground transition-colors cursor-pointer"
+                title={`Copy: ${url}`}
               >
-                {sidebarCollapsed ? "View feedback" : "Hide feedback"}
+                {url}
               </button>
-            )}
-            <ThemeToggle />
-            {!isSharedView && <ShareButton auditId={auditId} />}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {!isSharedView && isOwner && (
+                <div className="flex rounded-lg border border-border p-0.5 bg-muted/30">
+                  <button
+                    type="button"
+                    onClick={() => setCommentMode(false)}
+                    className={cn(
+                      "flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors",
+                      !commentMode ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <MousePointer className="h-4 w-4" />
+                    Interact
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCommentMode(true)}
+                    className={cn(
+                      "flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors",
+                      commentMode ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    Comment
+                  </button>
+                </div>
+              )}
+              {isSharedView && isAuthenticated && (
+                <button
+                  type="button"
+                  onClick={() => setSidebarCollapsed((c) => !c)}
+                  className="inline-flex items-center rounded-lg border border-border px-2.5 py-1.5 text-xs sm:text-sm font-medium text-foreground bg-background hover:bg-muted/50 transition-colors"
+                >
+                  {sidebarCollapsed ? "View feedback" : "Hide feedback"}
+                </button>
+              )}
+              <ThemeToggle />
+              {!isSharedView && isOwner && (
+                <Button variant="outline" size="sm" onClick={() => setShareModalOpen(true)}>
+                  <LinkIcon className="w-4 h-4 mr-2" />
+                  Share
+                </Button>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 flex flex-col lg:flex-row min-h-0">
+          <div className="flex-1 min-w-0 min-h-0 overflow-auto p-3 sm:p-4">
+            <LiveAuditView
+              auditId={auditId}
+              auditUrl={url}
+              pins={pins}
+              userPins={userPins}
+              commentMode={commentMode}
+              onCommentModeChange={setCommentMode}
+              highlightPin={highlightPin}
+              highlightPinIndexInPage={highlightPinIndexInPage}
+              onHighlightDone={() => setSelectedPinIndex(null)}
+              onSavePin={handleSavePin}
+              onPinSaved={() => router.refresh()}
+              initialPath={initialPath}
+            />
+          </div>
+          <div className="w-full lg:w-auto shrink-0 border-t lg:border-t-0 lg:border-l border-border">
+            <FeedbackSidebar
+              goal={goal}
+              pins={pins}
+              userPins={userPins}
+              selectedPinIndex={selectedPinIndex}
+              onSelectPin={setSelectedPinIndex}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+              createdAt={createdAt}
+            />
+          </div>
+        </main>
+      </div>
+
+      {!isAuthenticated && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-background/40" />
+          <div className="relative w-full max-w-sm bg-background border border-border rounded-2xl shadow-2xl p-8">
+            <div className="text-center space-y-2 mb-6">
+              <h2 className="text-xl font-semibold tracking-tight">
+                {sharedByName} has shared feedback with you
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Sign in to view all the feedbacks
+                  
+              </p>
+            </div>
+            <LoginForm callbackUrl={callbackUrl} />
           </div>
         </div>
-      </header>
+      )}
 
-      <main className="flex-1 flex flex-col lg:flex-row min-h-0">
-        <div className="flex-1 min-w-0 min-h-0 overflow-auto p-3 sm:p-4">
-          <LiveAuditView
-            auditId={auditId}
-            auditUrl={url}
-            pins={pins}
-            userPins={userPins}
-            commentMode={commentMode}
-            onCommentModeChange={setCommentMode}
-            highlightPin={highlightPin}
-            highlightPinIndexInPage={highlightPinIndexInPage}
-            onHighlightDone={() => setSelectedPinIndex(null)}
-            onSavePin={handleSavePin}
-            onPinSaved={() => router.refresh()}
-            initialPath={initialPath}
-          />
-        </div>
-        <div className="w-full lg:w-auto shrink-0 border-t lg:border-t-0 lg:border-l border-border">
-          <FeedbackSidebar
-            goal={goal}
-            pins={pins}
-            userPins={userPins}
-            selectedPinIndex={selectedPinIndex}
-            onSelectPin={setSelectedPinIndex}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-            createdAt={createdAt}
-          />
-        </div>
-      </main>
+      {isAuthenticated && (
+        <ShareModal
+          auditId={auditId}
+          open={shareModalOpen}
+          onOpenChange={setShareModalOpen}
+          shareVisibility={shareVisibility}
+          onSuccess={() => router.refresh()}
+        />
+      )}
     </div>
   );
 }

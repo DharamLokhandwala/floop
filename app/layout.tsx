@@ -12,8 +12,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Website feedback",
-  description: "Capture screenshots and give structured feedback on websites",
+  title: "floop - website feedback and iterations made easier",
+  description: "Collaborating with team, peers and stakeholders for design feedback made easier, just floop it for feedback",
+  icons: {
+    icon: "/floop-new-logo.svg",
+  },
 };
 
 export const viewport: Viewport = {

@@ -1,4 +1,5 @@
 import { addUserPin as addPinToDb } from "@/lib/audits";
+import { getCurrentUser } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import type { Pin } from "@/types/audit";
@@ -7,6 +8,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in to add a comment" }, { status: 401 });
+  }
   try {
     const { id } = await params;
     const body = await request.json();
@@ -22,6 +27,8 @@ export async function POST(
       viewportHeight: body.viewportHeight,
       scrollX: body.scrollX,
       scrollY: body.scrollY,
+      docX: body.docX,
+      docY: body.docY,
     };
 
     if (

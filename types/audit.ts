@@ -17,6 +17,9 @@ export interface Pin {
   /** Scroll position when pin was added (so hotspot stays in document coordinates) */
   scrollX?: number;
   scrollY?: number;
+  /** Exact document position in px (avoids percentage round-trip error in live view) */
+  docX?: number;
+  docY?: number;
 }
 
 export interface AuditData {

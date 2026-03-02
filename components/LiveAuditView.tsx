@@ -56,16 +56,17 @@ export function LiveAuditView({
   const [pendingClick, setPendingClick] = useState<PendingLiveClick | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [anchorPosition, setAnchorPosition] = useState<{ x: number; y: number } | null>(null);
-  const [iframePath, setIframePath] = useState(initialPath);
+  const [iframeSrcPath, setIframeSrcPath] = useState(initialPath);
+  const [currentPagePath, setCurrentPagePath] = useState(initialPath);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const pendingHighlightRef = useRef<Pin | null>(null);
   const pendingHighlightIndexRef = useRef<number | null>(null);
 
   const currentPath = useMemo(() => {
-    const p = iframePath || "/";
+    const p = currentPagePath || "/";
     const normalized = p === "/" ? "/" : p.replace(/\/$/, "") || "/";
     return normalized;
-  }, [iframePath]);
+  }, [currentPagePath]);
   const pinsForCurrentPage = useMemo(() => {
     const all = [...pins, ...userPins];
     return all.filter((pin) => getPinPath(pin) === currentPath);
@@ -98,6 +99,8 @@ export function LiveAuditView({
         viewportHeight: p.viewportHeight,
         scrollX: p.scrollX,
         scrollY: p.scrollY,
+        docX: p.docX,
+        docY: p.docY,
       })),
     });
   }, [iframeLoaded, pinsForCurrentPage, postToIframe]);
@@ -115,6 +118,8 @@ export function LiveAuditView({
           viewportHeight: e.data.viewportHeight,
           scrollX: e.data.scrollX,
           scrollY: e.data.scrollY,
+          docX: e.data.docX,
+          docY: e.data.docY,
         };
         setPendingClick(clickPayload);
         if (iframeRef.current && typeof e.data.x === "number" && typeof e.data.y === "number") {
@@ -129,7 +134,14 @@ export function LiveAuditView({
         setModalOpen(true);
       }
       if (e.data?.type === "AUDIT_VIEWER_READY") {
-        setIframePath(new URL(e.data.pageUrl || "").pathname || "/");
+        try {
+          const u = new URL(e.data.pageUrl || "", "http://_");
+          const p = u.pathname + u.search;
+          const normalized = !p || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
+          setCurrentPagePath(normalized);
+        } catch {
+          setCurrentPagePath("/");
+        }
       }
     };
     window.addEventListener("message", handler);
@@ -144,12 +156,12 @@ export function LiveAuditView({
     }
     const pin = highlightPin;
     const pinPath = pin.pageUrl ? new URL(pin.pageUrl).pathname + new URL(pin.pageUrl).search : "";
-    const currentPath = iframePath || "/";
 
     if (pinPath && pinPath !== currentPath) {
       pendingHighlightRef.current = pin;
       pendingHighlightIndexRef.current = typeof highlightPinIndexInPage === "number" ? highlightPinIndexInPage : null;
-      setIframePath(pinPath);
+      setIframeSrcPath(pinPath);
+      setCurrentPagePath(pinPath);
     } else {
       pendingHighlightRef.current = null;
       postToIframe({
@@ -163,7 +175,7 @@ export function LiveAuditView({
       }
       onHighlightDone?.();
     }
-  }, [highlightPin, highlightPinIndexInPage, auditId, iframePath, postToIframe, onHighlightDone]);
+  }, [highlightPin, highlightPinIndexInPage, auditId, currentPath, postToIframe, onHighlightDone]);
 
   const handleIframeLoad = useCallback(() => {
     setIframeLoaded(true);
@@ -192,7 +204,7 @@ export function LiveAuditView({
     onPinSaved?.();
   };
 
-  const iframeSrc = `/audit/${auditId}/view?path=${encodeURIComponent(iframePath || "/")}`;
+  const iframeSrc = `/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}`;
 
   // Show loading state again when path changes (e.g. user clicked a link in the iframe)
   useEffect(() => {

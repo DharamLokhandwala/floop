@@ -20,6 +20,9 @@ export type PendingLiveClick = {
   viewportHeight?: number;
   scrollX?: number;
   scrollY?: number;
+  /** Exact document position in px for pixel-perfect pin placement */
+  docX?: number;
+  docY?: number;
 };
 
 const MODAL_WIDTH = 380;
@@ -92,6 +95,8 @@ export function AddPinModal({
       if (typeof pendingLiveClick.viewportHeight === "number") pin.viewportHeight = pendingLiveClick.viewportHeight;
       if (typeof pendingLiveClick.scrollX === "number") pin.scrollX = pendingLiveClick.scrollX;
       if (typeof pendingLiveClick.scrollY === "number") pin.scrollY = pendingLiveClick.scrollY;
+      if (typeof pendingLiveClick.docX === "number") pin.docX = pendingLiveClick.docX;
+      if (typeof pendingLiveClick.docY === "number") pin.docY = pendingLiveClick.docY;
     }
 
     onSave(pin);

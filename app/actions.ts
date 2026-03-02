@@ -2,9 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { captureScreenshot, uploadScreenshotToBlob } from "@/lib/capture";
-// AI analysis disabled - manual pinning only
-// import { analyzeScreenshot } from "@/lib/analyze";
 import { createAudit } from "@/lib/audits";
+import { getCurrentUser } from "@/lib/auth";
 import { isValidUrl, normalizeUrl, validateGoal } from "@/lib/validation";
 import { v4 } from "uuid";
 
@@ -32,16 +31,15 @@ export async function runAudit(
     return { error: goalError };
   }
 
+  const user = await getCurrentUser();
+  if (!user) {
+    return { error: "Sign in to create feedback" };
+  }
+
   try {
     const buffer = await captureScreenshot(url);
     const screenshotUrl = await uploadScreenshotToBlob(buffer);
-    
-    // AI analysis disabled - using manual pinning only
-    // const pins = await analyzeScreenshot({
-    //   screenshotUrl,
-    //   goal: (goal ?? "").trim(),
-    // });
-    const pins: never[] = []; // Empty array - users will add pins manually
+    const pins: never[] = [];
 
     const id = v4();
     await createAudit({
@@ -50,6 +48,7 @@ export async function runAudit(
       goal: (goal ?? "").trim(),
       screenshotUrl,
       pins,
+      createdById: user.id,
     });
 
     redirect(`/audit/${id}`);

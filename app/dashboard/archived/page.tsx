@@ -1,4 +1,6 @@
-import { getArchivedAudits, type AuditListItem } from "@/lib/audits";
+import { redirect } from "next/navigation";
+import { getArchivedAuditsCreatedByMe, type AuditListItem } from "@/lib/audits";
+import { getCurrentUser } from "@/lib/auth";
 import {
   Table,
   TableBody,
@@ -15,7 +17,9 @@ import { BackButton } from "@/components/BackButton";
 import { runAudit } from "@/app/actions";
 
 export default async function ArchivedPage() {
-  const audits = await getArchivedAudits();
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  const audits = await getArchivedAuditsCreatedByMe(user.id);
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat("en-US", {

@@ -1,17 +1,33 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import { LoginForm } from "@/components/LoginForm";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ verify?: string }>;
+  searchParams: Promise<{ verify?: string; callbackUrl?: string; fromAuditId?: string }>;
 }) {
   const user = await getCurrentUser();
-  if (user) redirect("/dashboard");
-
   const params = await searchParams;
+  const callbackUrl =
+    params.callbackUrl && params.callbackUrl.startsWith("/") ? params.callbackUrl : "/dashboard";
+
+  let sharedByName: string | null = null;
+  if (params.fromAuditId) {
+    const audit = await prisma.audit.findUnique({
+      where: { id: params.fromAuditId },
+      include: { creator: true },
+    });
+    if (audit?.creator) {
+      sharedByName = audit.creator.name || audit.creator.email || null;
+    }
+  }
+
+  if (user) redirect(callbackUrl);
+
   const showVerifyMessage = params.verify === "1";
+  const fromSharedAudit = !!sharedByName && callbackUrl.startsWith("/audit/");
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
@@ -21,7 +37,9 @@ export default async function LoginPage({
           <p className="text-muted-foreground text-sm">
             {showVerifyMessage
               ? "Check your email for the sign-in link."
-              : "Enter your email and we'll send you a sign-in link."}
+              : fromSharedAudit
+                ? `${sharedByName} has shared feedback with you. Sign in below to view it.`
+                : "Sign in with your email and password, or request a sign-in link."}
           </p>
         </div>
         {showVerifyMessage ? (
@@ -29,7 +47,7 @@ export default async function LoginPage({
             If you don't see the email, check your spam folder or try again.
           </div>
         ) : (
-          <LoginForm />
+          <LoginForm callbackUrl={callbackUrl} />
         )}
       </div>
     </div>

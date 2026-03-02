@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DashboardNavActions } from "@/components/DashboardNavActions";
 import { NewWebsiteModal } from "@/components/NewWebsiteModal";
@@ -35,9 +36,18 @@ export default async function SettingsPage() {
           <section className="space-y-4">
             <h2 className="text-lg font-medium">Sign-in</h2>
             <div className="rounded-lg border border-gray-500 dark:border-border bg-card p-4">
-              <p className="text-sm text-muted-foreground">
-                You sign in with an email link. No password to change. You can set a password later when we add that option.
-              </p>
+              {user.passwordHash ? (
+                <p className="text-sm text-muted-foreground">
+                  You sign in with your email and password.
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  You signed up with an email link. Set a password to sign in with email and password next time.{" "}
+                  <Link href="/dashboard/set-password" className="text-primary hover:underline">
+                    Set password
+                  </Link>
+                </p>
+              )}
             </div>
           </section>
 
