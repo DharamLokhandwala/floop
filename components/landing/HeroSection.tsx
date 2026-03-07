@@ -84,7 +84,7 @@ export function HeroSection() {
         </p> */}
         <div className="pt-1 sm:pt-2 flex flex-col items-center gap-3">
           <Link
-            href="/dashboard"
+            href="https://tally.so/r/3j4JAY"
             onMouseEnter={() => setCtaHovered(true)}
             onMouseLeave={() => setCtaHovered(false)}
           >

@@ -130,6 +130,7 @@ export function DashboardAuditView({
                 );
               })
             : givenList.map((audit: SerializedShared) => {
+                const isOwner = audit.isOwner !== false;
                 const total = audit.feedbackCount ?? 0;
                 const nc = audit.newCommentsCount ?? 0;
                 const hasNew = nc > 0;
@@ -145,9 +146,9 @@ export function DashboardAuditView({
                     reviewerName={audit.reviewerName}
                     commentsLabel={commentsLabel}
                     hasNewComments={hasNew}
-                    canEdit={audit.isOwner}
+                    canEdit={isOwner}
                     selected={selectedIds.has(audit.id)}
-                    onToggleSelect={audit.isOwner ? toggleSelect : undefined}
+                    onToggleSelect={isOwner ? toggleSelect : undefined}
                   />
                 );
               })}
@@ -191,23 +192,26 @@ export function DashboardAuditView({
                     onToggleSelect={toggleSelect}
                   />
                 ))
-              : givenList.map((audit: SerializedShared) => (
-                  <AuditTableRow
-                    key={audit.id}
-                    id={audit.id}
-                    href={`/audit/${audit.id}`}
-                    screenshotUrl={audit.screenshotUrl}
-                    dateFormatted={formatRelativeDate(audit.createdAt)}
-                    websiteUrl={audit.url}
-                    goal={audit.goal}
-                    name={audit.reviewerName}
-                    canEdit={audit.isOwner}
-                    feedbackCount={audit.feedbackCount}
-                    newCommentsCount={audit.newCommentsCount}
-                    selected={selectedIds.has(audit.id)}
-                    onToggleSelect={audit.isOwner ? toggleSelect : undefined}
-                  />
-                ))}
+              : givenList.map((audit: SerializedShared) => {
+                  const isOwner = audit.isOwner !== false;
+                  return (
+                    <AuditTableRow
+                      key={audit.id}
+                      id={audit.id}
+                      href={`/audit/${audit.id}`}
+                      screenshotUrl={audit.screenshotUrl}
+                      dateFormatted={formatRelativeDate(audit.createdAt)}
+                      websiteUrl={audit.url}
+                      goal={audit.goal}
+                      name={audit.reviewerName}
+                      canEdit={isOwner}
+                      feedbackCount={audit.feedbackCount}
+                      newCommentsCount={audit.newCommentsCount}
+                      selected={selectedIds.has(audit.id)}
+                      onToggleSelect={isOwner ? toggleSelect : undefined}
+                    />
+                  );
+                })}
           </TableBody>
         </Table>
       </div>

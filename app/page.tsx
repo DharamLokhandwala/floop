@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Linkedin, Mail } from "lucide-react";
 import { HeroSection } from "@/components/landing/HeroSection";
-import { Button } from "@/components/ui/button";
+import { CalDemoButton } from "@/components/landing/CalDemoButton";
 
 export default function Home() {
   return (
@@ -21,9 +21,7 @@ export default function Home() {
             />
           </Link>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-            <Link href="/login" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
-              Login
-            </Link>
+            <CalDemoButton />
             {/* <Link href="/dashboard">
               <Button className="rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-md shadow-primary/20 px-3 sm:px-5 text-xs sm:text-base py-2 sm:py-2.5">
                 Get early access

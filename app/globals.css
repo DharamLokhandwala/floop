@@ -111,6 +111,12 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Blur page background when Cal.com booking modal is open */
+body.cal-modal-open > div {
+  filter: blur(4px);
+  transition: filter 0.2s ease;
+}
+
 /* Landing page: subtle dotted background */
 .landing-dots {
   background-image: radial-gradient(circle, oklch(0.75 0.005 250 / 0.12) 1px, transparent 1px);

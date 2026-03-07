@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Image from "next/image";
 import {
   getAuditsRequestedByMe,
   getAuditsGivenByMe,
@@ -46,10 +47,12 @@ export default async function DashboardPage({
 
   return (
     <div className="min-h-screen bg-background">
-      {profileComplete < 100 && (
-        <ProfileCompletionBanner completionPercent={profileComplete} />
-      )}
-      {!user.passwordHash && <SetPasswordBanner />}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-3 items-end">
+        {profileComplete < 100 && (
+          <ProfileCompletionBanner completionPercent={profileComplete} />
+        )}
+        {!user.passwordHash && <SetPasswordBanner />}
+      </div>
       <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-6xl">
         <div className="flex flex-col gap-4 mb-6 sm:mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -67,13 +70,36 @@ export default async function DashboardPage({
         </div>
 
         {(tab === "given" ? givenList : requestedList).length === 0 ? (
-          <div className="text-center py-10 sm:py-12">
-            <p className="text-muted-foreground mb-4 text-sm sm:text-base">
-              {tab === "given"
-                ? "No floops given yet. Give feedback or check shared links."
-                : "Incredible websites are built with feedbacks. Create your first floop link for feedbacks!"}
-            </p>
-            <CreateFloopLinkDropdown />
+          <div className="text-center py-10 sm:py-12 flex flex-col items-center">
+            {tab === "requested" ? (
+              <>
+                <div className="flex justify-center mb-6">
+                  <Image
+                    src="/request-floop-emptyState.svg"
+                    alt="Request feedback on your website"
+                    width={560}
+                    height={360}
+                    className="w-full max-w-[560px] h-auto object-contain"
+                    priority
+                  />
+                </div>
+                <CreateFloopLinkDropdown />
+              </>
+            ) : (
+              <>
+                <div className="flex justify-center mb-6">
+                  <Image
+                    src="/floops-given-emptyState.svg"
+                    alt="floop feedback to others' website"
+                    width={560}
+                    height={360}
+                    className="w-full max-w-[560px] h-auto object-contain"
+                    priority
+                  />
+                </div>
+                <CreateFloopLinkDropdown />
+              </>
+            )}
           </div>
         ) : (
           <DashboardAuditView
