@@ -60,18 +60,21 @@ model VerificationToken {
 }
 
 model Audit {
-  id              String       @id
-  url             String
-  goal            String
-  screenshotUrl   String
-  pinsJson        String
-  userPinsJson    String?      @default("[]")
-  archived        Boolean      @default(false)
-  createdAt       DateTime     @default(now())
-  createdById     String?
-  shareVisibility String       @default("private") // "public" | "private"
-  creator         User?        @relation("AuditCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  shares          AuditShare[]
+  id                         String       @id
+  url                        String
+  goal                       String
+  screenshotUrl              String
+  pinsJson                   String
+  userPinsJson               String?      @default("[]")
+  archived                   Boolean      @default(false)
+  createdAt                  DateTime     @default(now())
+  createdById                String?
+  shareVisibility            String       @default("private") // "public" | "private"
+  mode                       String       @default("give_feedback") // "give_feedback" | "request_feedback"
+  reviewerName               String?
+  ownerLastSeenUserPinsCount Int          @default(0)
+  creator                    User?        @relation("AuditCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  shares                     AuditShare[]
 }
 
 model AuditShare {

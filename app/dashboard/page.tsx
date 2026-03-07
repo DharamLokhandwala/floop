@@ -1,28 +1,21 @@
 import { redirect } from "next/navigation";
 import {
-  getAuditsCreatedByMe,
-  getAuditsSharedWithMe,
-  getCreatedByMeCount,
-  getSharedWithMeCount,
-  type AuditListItem,
+  getAuditsRequestedByMe,
+  getAuditsGivenByMe,
+  getRequestedByMeCount,
+  getGivenByMeCount,
   type SharedAuditListItem,
+  type RequestedAuditListItem,
 } from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
-import {
-  Table,
-  TableBody,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { AuditTableRow } from "@/components/AuditTableRow";
-import { NewWebsiteModal } from "@/components/NewWebsiteModal";
+import { CreateFloopLinkDropdown } from "@/components/CreateFloopLinkDropdown";
+import { DashboardAuditView } from "@/components/DashboardAuditView";
 import { DashboardNavActions } from "@/components/DashboardNavActions";
 import { DashboardTabToggle } from "@/components/DashboardTabToggle";
+import { ViewToggle } from "@/components/ViewToggle";
 import { ProfileCompletionBanner } from "@/components/ProfileCompletionBanner";
 import { SetPasswordBanner } from "@/components/SetPasswordBanner";
-import { runAudit } from "@/app/actions";
 
 function profileCompletionPercent(user: { name: string | null; email: string | null; image: string | null }): number {
   let n = 0;
@@ -40,26 +33,16 @@ export default async function DashboardPage({
   if (!user) redirect("/login");
 
   const params = await searchParams;
-  const tab = params.tab === "shared" ? "shared" : "created";
+  const tab = params.tab === "given" ? "given" : "requested";
   const profileComplete = profileCompletionPercent(user);
-  const [createdCount, sharedCount, createdList, sharedList] = await Promise.all([
-    getCreatedByMeCount(user.id),
-    getSharedWithMeCount(user.id),
-    getAuditsCreatedByMe(user.id),
-    getAuditsSharedWithMe(user.id),
+  const [requestedCount, givenCount, requestedList, givenList] = await Promise.all([
+    getRequestedByMeCount(user.id),
+    getGivenByMeCount(user.id),
+    getAuditsRequestedByMe(user.id),
+    getAuditsGivenByMe(user.id),
   ]);
-  const audits: AuditListItem[] = tab === "shared" ? sharedList : createdList;
-  const sharedHasNewComments = sharedList.some((a) => a.newCommentsCount > 0);
-
-  const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat("en-US", {
-      day: "numeric",
-      month: "short",
-      year: "2-digit",
-    })
-      .format(date)
-      .replace(",", ","); // Format: "19 Feb, 26"
-  };
+  const requestedHasFeedback = requestedList.some((a) => (a as RequestedAuditListItem).newCommentsCount > 0);
+  const givenHasNewComments = givenList.some((a) => a.newCommentsCount > 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -73,52 +56,31 @@ export default async function DashboardPage({
             <h1 className="text-2xl sm:text-3xl font-medium tracking-tight">Websites</h1>
             <div className="flex items-center gap-2 shrink-0">
             <ThemeToggle />
-            <NewWebsiteModal action={runAudit} />
+            <CreateFloopLinkDropdown />
             <DashboardNavActions />
             </div>
           </div>
-          <DashboardTabToggle createdCount={createdCount} sharedCount={sharedCount} sharedHasNewComments={sharedHasNewComments} />
+          <div className="flex items-center justify-between w-full">
+            <DashboardTabToggle requestedCount={requestedCount} givenCount={givenCount} requestedHasFeedback={requestedHasFeedback} givenHasNewComments={givenHasNewComments} />
+            <ViewToggle />
+          </div>
         </div>
 
-        {audits.length === 0 ? (
+        {(tab === "given" ? givenList : requestedList).length === 0 ? (
           <div className="text-center py-10 sm:py-12">
             <p className="text-muted-foreground mb-4 text-sm sm:text-base">
-              {tab === "shared"
-                ? "No feedback shared with you yet."
-                : "No feedback yet. Create your first one!"}
+              {tab === "given"
+                ? "No floops given yet. Give feedback or check shared links."
+                : "No feedback links yet. Create one and share it with reviewers!"}
             </p>
-            {tab === "created" && (
-              <NewWebsiteModal action={runAudit} triggerLabel="Give feedback" />
-            )}
+            <CreateFloopLinkDropdown />
           </div>
         ) : (
-          <div className="-mx-4 sm:mx-0 px-4 sm:px-0">
-            <Table className="table-fixed w-full">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-28 sm:w-32">Date</TableHead>
-                  <TableHead className="w-48 sm:w-56">Website</TableHead>
-                  <TableHead className="w-48 sm:w-56">User goal</TableHead>
-                  {tab === "shared" && <TableHead className="w-28 shrink-0" />}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {audits.map((audit) => (
-                  <AuditTableRow
-                    key={audit.id}
-                    id={audit.id}
-                    href={`/audit/${audit.id}`}
-                    screenshotUrl={audit.screenshotUrl}
-                    dateFormatted={formatDate(audit.createdAt)}
-                    websiteUrl={audit.url}
-                    goal={audit.goal}
-                    canEdit={tab === "created"}
-                    newCommentsCount={tab === "shared" ? (audit as SharedAuditListItem).newCommentsCount : undefined}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <DashboardAuditView
+            requestedList={requestedList as unknown as { id: string; url: string; goal: string; screenshotUrl: string; createdAt: string; feedbackCount: number; reviewerName?: string | null; newCommentsCount: number }[]}
+            givenList={givenList as unknown as { id: string; url: string; goal: string; screenshotUrl: string; createdAt: string; feedbackCount: number; newCommentsCount: number; isOwner?: boolean; reviewerName?: string | null }[]}
+            tab={tab}
+          />
         )}
       </div>
     </div>

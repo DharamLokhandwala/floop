@@ -2,14 +2,15 @@ import { prisma } from "./db";
 import type { Pin } from "@/types/audit";
 import type { Audit as PrismaAudit } from "@prisma/client";
 
-/** Used when reading createdById/shareVisibility so code works even if Prisma client types omit them (e.g. on Vercel). */
-type AuditOwnerFields = { createdById?: string | null; shareVisibility?: string | null };
+/** Used when reading createdById/shareVisibility/mode so code works even if Prisma client types omit them (e.g. on Vercel). */
+type AuditOwnerFields = { createdById?: string | null; shareVisibility?: string | null; mode?: string | null };
 
 export type AuditWithPins = Omit<PrismaAudit, "pinsJson" | "userPinsJson"> & {
   pins: Pin[];
   userPins: Pin[];
   shareVisibility?: string | null;
   createdById?: string | null;
+  mode?: string | null;
 };
 
 export interface CreateAuditInput {
@@ -19,10 +20,12 @@ export interface CreateAuditInput {
   screenshotUrl: string;
   pins: Pin[];
   createdById?: string | null;
+  /** "give_feedback" | "request_feedback"; default give_feedback */
+  mode?: "give_feedback" | "request_feedback";
 }
 
 export async function createAudit(input: CreateAuditInput) {
-  return prisma.audit.create({
+  const audit = await prisma.audit.create({
     data: {
       id: input.id,
       url: input.url,
@@ -34,6 +37,10 @@ export async function createAudit(input: CreateAuditInput) {
         : {}),
     },
   });
+  if (input.mode === "request_feedback") {
+    await prisma.$executeRaw`UPDATE Audit SET mode = 'request_feedback' WHERE id = ${input.id}`;
+  }
+  return audit;
 }
 
 export async function getAuditById(id: string): Promise<AuditWithPins | null> {
@@ -41,6 +48,11 @@ export async function getAuditById(id: string): Promise<AuditWithPins | null> {
     where: { id },
   });
   if (!audit) return null;
+
+  const [modeRow] = await prisma.$queryRaw<[{ mode: string | null }]>`
+    SELECT mode FROM Audit WHERE id = ${id}
+  `;
+  const mode = modeRow?.mode ?? "give_feedback";
 
   const aiPins = JSON.parse(audit.pinsJson) as Pin[];
   const userPins = audit.userPinsJson
@@ -50,6 +62,7 @@ export async function getAuditById(id: string): Promise<AuditWithPins | null> {
   const { pinsJson, userPinsJson, ...rest } = audit;
   return {
     ...rest,
+    mode,
     pins: aiPins,
     userPins,
   };
@@ -95,7 +108,24 @@ export type AuditListItem = {
   createdAt: Date;
 };
 
-export type SharedAuditListItem = AuditListItem & { newCommentsCount: number };
+/** Requested audit with counts needed for the requested tab. */
+export type RequestedAuditListItem = AuditListItem & {
+  /** Total number of comments (user pins). */
+  feedbackCount: number;
+  /** Optional reviewer name captured when sharing the request link. */
+  reviewerName?: string | null;
+  /** Number of new comments since the owner last viewed the audit. */
+  newCommentsCount: number;
+};
+
+export type SharedAuditListItem = AuditListItem & {
+  /** Total number of comments (user pins). */
+  feedbackCount: number;
+  newCommentsCount: number;
+  isOwner?: boolean;
+  /** Name set in share modal (who you're flooping to). */
+  reviewerName?: string | null;
+};
 
 export async function archiveAudit(id: string, userId: string) {
   const audit = await prisma.audit.findUnique({ where: { id } });
@@ -170,17 +200,19 @@ export async function getAuditsSharedWithMe(userId: string): Promise<SharedAudit
     orderBy: { createdAt: "desc" },
   });
   return shares.map((s) => {
-    const userPinsLength = s.audit.userPinsJson
+    const feedbackCount = s.audit.userPinsJson
       ? (JSON.parse(s.audit.userPinsJson) as unknown[]).length
       : 0;
-    const newCommentsCount = Math.max(0, userPinsLength - s.lastSeenUserPinsCount);
+    const newCommentsCount = Math.max(0, feedbackCount - s.lastSeenUserPinsCount);
     return {
       id: s.audit.id,
       url: s.audit.url,
       goal: s.audit.goal,
       screenshotUrl: s.audit.screenshotUrl,
       createdAt: s.audit.createdAt,
+      feedbackCount,
       newCommentsCount,
+      reviewerName: (s.audit as { reviewerName?: string | null }).reviewerName ?? null,
     };
   });
 }
@@ -197,6 +229,30 @@ export async function updateLastSeenForSharedAudit(
   });
 }
 
+/** Update the owner's \"last seen\" user-pins count so new comments can be computed for the requested tab. */
+export async function updateOwnerLastSeenForAudit(
+  auditId: string,
+  ownerId: string,
+  userPinsCount: number
+) {
+  await prisma.$executeRaw`
+    UPDATE Audit SET ownerLastSeenUserPinsCount = ${userPinsCount}
+    WHERE id = ${auditId} AND createdById = ${ownerId}
+  `;
+}
+
+/** Set or update the reviewer name for a request-feedback audit (owned by the caller). */
+export async function setReviewerName(
+  auditId: string,
+  ownerId: string,
+  reviewerName: string
+) {
+  await prisma.$executeRaw`
+    UPDATE Audit SET reviewerName = ${reviewerName}
+    WHERE id = ${auditId} AND createdById = ${ownerId}
+  `;
+}
+
 export async function getCreatedByMeCount(userId: string): Promise<number> {
   return prisma.audit.count({
     where: { createdById: userId, archived: false },
@@ -207,6 +263,128 @@ export async function getSharedWithMeCount(userId: string): Promise<number> {
   return prisma.auditShare.count({
     where: { sharedWithUserId: userId },
   });
+}
+
+/** Floops requested: audits I created where I'm requesting feedback (mode request_feedback). */
+export async function getAuditsRequestedByMe(userId: string): Promise<RequestedAuditListItem[]> {
+  const rows = await prisma.$queryRaw<
+    {
+      id: string;
+      url: string;
+      goal: string;
+      screenshotUrl: string;
+      createdAt: Date;
+      userPinsJson: string | null;
+      reviewerName: string | null;
+      ownerLastSeenUserPinsCount: number | null;
+    }[]
+  >`
+    SELECT id, url, goal, screenshotUrl, createdAt, userPinsJson, reviewerName, ownerLastSeenUserPinsCount
+    FROM Audit
+    WHERE createdById = ${userId} AND archived = 0 AND mode = 'request_feedback'
+    ORDER BY createdAt DESC
+  `;
+  return rows.map((r) => {
+    let feedbackCount = 0;
+    if (r.userPinsJson) {
+      try {
+        const arr = JSON.parse(r.userPinsJson) as unknown[];
+        feedbackCount = Array.isArray(arr) ? arr.length : 0;
+      } catch {
+        feedbackCount = 0;
+      }
+    }
+    const lastSeen = r.ownerLastSeenUserPinsCount ?? 0;
+    const newCommentsCount = Math.max(0, feedbackCount - lastSeen);
+    return {
+      id: r.id,
+      url: r.url,
+      goal: r.goal,
+      screenshotUrl: r.screenshotUrl,
+      createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
+      feedbackCount,
+      reviewerName: r.reviewerName,
+      newCommentsCount,
+    };
+  });
+}
+
+/** Floops given: audits I created with give_feedback + audits shared with me. */
+export async function getAuditsGivenByMe(userId: string): Promise<SharedAuditListItem[]> {
+  const [createdRows, sharedList] = await Promise.all([
+    prisma.$queryRaw<
+      { id: string; url: string; goal: string; screenshotUrl: string; createdAt: Date; userPinsJson: string | null; reviewerName: string | null }[]
+    >`
+      SELECT id, url, goal, screenshotUrl, createdAt, userPinsJson, reviewerName FROM Audit
+      WHERE createdById = ${userId} AND archived = 0 AND (mode IS NULL OR mode != 'request_feedback')
+      ORDER BY createdAt DESC
+    `,
+    getAuditsSharedWithMe(userId),
+  ]);
+  const createdGiven = createdRows.map((r) => {
+    let feedbackCount = 0;
+    if (r.userPinsJson) {
+      try {
+        const arr = JSON.parse(r.userPinsJson) as unknown[];
+        feedbackCount = Array.isArray(arr) ? arr.length : 0;
+      } catch {
+        feedbackCount = 0;
+      }
+    }
+    return {
+      id: r.id,
+      url: r.url,
+      goal: r.goal,
+      screenshotUrl: r.screenshotUrl,
+      createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
+      feedbackCount,
+      reviewerName: r.reviewerName,
+    };
+  });
+  const createdItems: SharedAuditListItem[] = createdGiven.map((a) => ({
+    id: a.id,
+    url: a.url,
+    goal: a.goal,
+    screenshotUrl: a.screenshotUrl,
+    createdAt: a.createdAt,
+    feedbackCount: a.feedbackCount,
+    newCommentsCount: 0,
+    isOwner: true,
+    reviewerName: a.reviewerName,
+  }));
+  const seen = new Set(createdItems.map((a) => a.id));
+  const merged = [...createdItems];
+  for (const s of sharedList) {
+    if (!seen.has(s.id)) {
+      seen.add(s.id);
+      merged.push({ ...s, isOwner: false });
+    }
+  }
+  merged.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return merged;
+}
+
+export async function getRequestedByMeCount(userId: string): Promise<number> {
+  const result = await prisma.$queryRaw<[{ count: number }]>`
+    SELECT COUNT(*) as count FROM Audit
+    WHERE createdById = ${userId} AND archived = 0 AND mode = 'request_feedback'
+  `;
+  return Number(result[0]?.count ?? 0);
+}
+
+export async function getGivenByMeCount(userId: string): Promise<number> {
+  const [createdRows, shared] = await Promise.all([
+    prisma.$queryRaw<[{ id: string }]>`
+      SELECT id FROM Audit
+      WHERE createdById = ${userId} AND archived = 0 AND (mode IS NULL OR mode != 'request_feedback')
+    `,
+    prisma.auditShare.findMany({
+      where: { sharedWithUserId: userId },
+      select: { auditId: true },
+    }),
+  ]);
+  const givenCreatedIds = createdRows.map((r) => r.id);
+  return new Set([...givenCreatedIds, ...shared.map((r) => r.auditId)]).size;
 }
 
 export async function setShareVisibility(auditId: string, visibility: "public" | "private", userId: string) {

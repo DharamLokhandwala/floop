@@ -15,11 +15,12 @@ export default async function ProfilePage() {
   }
 
   const [totalAudits, archivedCount] = await Promise.all([
-    prisma.audit.count({ where: { archived: false } }),
-    prisma.audit.count({ where: { archived: true } }),
+    prisma.audit.count({ where: { createdById: user.id, archived: false } }),
+    prisma.audit.count({ where: { createdById: user.id, archived: true } }),
   ]);
 
   const lastAudit = await prisma.audit.findFirst({
+    where: { createdById: user.id },
     orderBy: { createdAt: "desc" },
     select: { createdAt: true },
   });

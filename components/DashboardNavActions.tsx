@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { signOut } from "next-auth/react";
-import { MoreVertical, User, Settings, Archive, LogOut } from "lucide-react";
+import { MoreVertical, User, Settings, Archive, LogOut, Bug, MessageSquare } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+
+const SUPPORT_EMAIL = "support@floop.design";
 
 export function DashboardNavActions() {
   return (
@@ -29,6 +31,25 @@ export function DashboardNavActions() {
             <Settings className="size-4" />
             Settings
           </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <a
+            href={`mailto:${SUPPORT_EMAIL}?subject=Report error or bug`}
+            className="flex items-center gap-2"
+          >
+            <Bug className="size-4" />
+            Report error and bugs
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a
+            href={`mailto:${SUPPORT_EMAIL}?subject=Feedback`}
+            className="flex items-center gap-2"
+          >
+            <MessageSquare className="size-4" />
+            Give feedback
+          </a>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>

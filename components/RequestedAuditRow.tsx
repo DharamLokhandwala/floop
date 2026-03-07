@@ -9,51 +9,29 @@ import {
 import { TableRow, TableCell } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import type { RequestedAuditListItem } from "@/lib/audits";
 
 const PRIMARY_DOT = "#3a3cff";
 
-interface AuditTableRowProps {
-  id: string;
-  href: string;
-  screenshotUrl: string;
+interface RequestedAuditRowProps {
+  audit: RequestedAuditListItem;
   dateFormatted: string;
-  websiteUrl: string;
-  goal: string;
-  /** Name for "Flooping to" column (given tab); e.g. "—" when not available. */
-  name?: string | null;
-  /** When true, show Restore instead of Archive (for archived list). */
-  archived?: boolean;
-  /** When false, hide archive/delete (e.g. for shared-with-me audits). */
-  canEdit?: boolean;
-  /** When > 0, show "[X] new comments" with dot at the right end of the row (shared tab). */
-  newCommentsCount?: number;
-  /** When > 0, show blue dot and feedback count (requested tab – someone left feedback). */
-  feedbackCount?: number;
-  /** Selection state for batch actions. */
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
 }
 
-export function AuditTableRow({
-  id,
-  href,
-  screenshotUrl,
+export function RequestedAuditRow({
+  audit,
   dateFormatted,
-  websiteUrl,
-  goal,
-  name = "—",
-  archived = false,
-  canEdit = true,
-  newCommentsCount = 0,
-  feedbackCount = 0,
   selected = false,
   onToggleSelect,
-}: AuditTableRowProps) {
+}: RequestedAuditRowProps) {
   const router = useRouter();
 
-  const total = feedbackCount ?? 0;
-  const hasNew = (newCommentsCount ?? 0) > 0;
-  const commentsLabel = hasNew ? `${total} (+${newCommentsCount})` : `${total}`;
+  const total = audit.feedbackCount;
+  const delta = audit.newCommentsCount;
+  const hasNew = delta > 0;
+  const commentsLabel = hasNew ? `${total} (+${delta})` : `${total}`;
 
   const handleCellClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -66,24 +44,24 @@ export function AuditTableRow({
           role="button"
           tabIndex={0}
           className="group cursor-pointer hover:bg-zinc-700/50 dark:hover:bg-zinc-300/50"
-          onClick={() => router.push(href)}
+          onClick={() => router.push(`/audit/${audit.id}`)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
-              router.push(href);
+              router.push(`/audit/${audit.id}`);
             }
           }}
         >
           <TableCell className="font-medium px-3 py-2.5 align-middle">
-            {name?.trim() || "—"}
+            {audit.reviewerName?.trim() || "—"}
           </TableCell>
           <TableCell className="min-w-0 overflow-hidden px-3 py-2.5 align-middle">
-            
-              {websiteUrl}
+           
+              {audit.url}
             
           </TableCell>
           <TableCell className="min-w-0 overflow-hidden px-3 py-2.5 align-middle">
-            <span className="block truncate" title={goal}>{goal}</span>
+            <span className="block truncate" title={audit.goal}>{audit.goal}</span>
           </TableCell>
           <TableCell className="text-center px-3 py-2.5 align-middle">
             <div className="flex items-center justify-center gap-2">
@@ -103,14 +81,19 @@ export function AuditTableRow({
             {dateFormatted}
           </TableCell>
           <TableCell
-            className="shrink-0 px-1 py-1 align-right"
+            className="w-10 shrink-0 px-2 py-2.5 text-right align-middle"
             onClick={handleCellClick}
           >
-            {canEdit && onToggleSelect && (
-              <div className={cn("flex justify-end transition-opacity", selected ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
+            {onToggleSelect && (
+              <div
+                className={cn(
+                  "flex justify-end transition-opacity",
+                  selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                )}
+              >
                 <Checkbox
                   checked={selected}
-                  onCheckedChange={() => onToggleSelect(id)}
+                  onCheckedChange={() => onToggleSelect(audit.id)}
                   aria-label="Select row"
                 />
               </div>
@@ -125,7 +108,7 @@ export function AuditTableRow({
       >
         <div className="w-[320px] h-[180px] overflow-hidden rounded-lg border border-zinc-300 shadow-md">
           <img
-            src={screenshotUrl}
+            src={audit.screenshotUrl}
             alt="Website hero"
             className="w-full h-full object-cover object-top"
           />

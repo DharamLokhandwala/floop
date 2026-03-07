@@ -3,26 +3,28 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-type Tab = "created" | "shared";
+type Tab = "requested" | "given";
 
 const PRIMARY_DOT = "#3a3cff";
 
 export function DashboardTabToggle({
-  createdCount,
-  sharedCount,
-  sharedHasNewComments,
+  requestedCount,
+  givenCount,
+  requestedHasFeedback,
+  givenHasNewComments,
 }: {
-  createdCount: number;
-  sharedCount: number;
-  sharedHasNewComments?: boolean;
+  requestedCount: number;
+  givenCount: number;
+  requestedHasFeedback?: boolean;
+  givenHasNewComments?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tab = (searchParams.get("tab") as Tab) || "created";
+  const tab = (searchParams.get("tab") as Tab) || "requested";
 
   const setTab = (t: Tab) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (t === "created") {
+    if (t === "requested") {
       params.delete("tab");
     } else {
       params.set("tab", t);
@@ -35,28 +37,35 @@ export function DashboardTabToggle({
     <div className="flex rounded-lg border border-border p-0.5 bg-muted/30 w-fit">
       <button
         type="button"
-        onClick={() => setTab("created")}
+        onClick={() => setTab("requested")}
         className={cn(
-          "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-          tab === "created"
+          "px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5",
+          tab === "requested"
             ? "bg-background shadow text-foreground"
             : "text-muted-foreground hover:text-foreground"
         )}
       >
-        Created by me ({createdCount})
+        Floops requested ({requestedCount})
+        {requestedHasFeedback && (
+          <span
+            className="rounded-full size-2 shrink-0"
+            style={{ backgroundColor: PRIMARY_DOT }}
+            aria-hidden
+          />
+        )}
       </button>
       <button
         type="button"
-        onClick={() => setTab("shared")}
+        onClick={() => setTab("given")}
         className={cn(
           "px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5",
-          tab === "shared"
+          tab === "given"
             ? "bg-background shadow text-foreground"
             : "text-muted-foreground hover:text-foreground"
         )}
       >
-        Shared with me ({sharedCount})
-        {sharedHasNewComments && (
+        Floops given ({givenCount})
+        {givenHasNewComments && (
           <span
             className="rounded-full size-2 shrink-0"
             style={{ backgroundColor: PRIMARY_DOT }}

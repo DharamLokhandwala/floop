@@ -45,10 +45,10 @@ export function ProfileCompletionBanner({
         <User className="h-5 w-5 shrink-0 text-muted-foreground" />
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">
-            Complete profile
+            Welcome to floop!
           </p>
           
-            Profile is {completionPercent}% complete
+            Looks like your profile is just {completionPercent}% complete
           
         </div>
       </div>

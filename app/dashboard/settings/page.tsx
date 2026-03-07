@@ -38,7 +38,7 @@ export default async function SettingsPage() {
             <div className="rounded-lg border border-gray-500 dark:border-border bg-card p-4">
               {user.passwordHash ? (
                 <p className="text-sm text-muted-foreground">
-                  You sign in with your email and password.
+                  Your account is set up to sign in with your email and password.
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">

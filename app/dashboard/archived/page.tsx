@@ -12,9 +12,8 @@ import {
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AuditTableRow } from "@/components/AuditTableRow";
 import { DashboardNavActions } from "@/components/DashboardNavActions";
-import { NewWebsiteModal } from "@/components/NewWebsiteModal";
+import { CreateFloopLinkDropdown } from "@/components/CreateFloopLinkDropdown";
 import { BackButton } from "@/components/BackButton";
-import { runAudit } from "@/app/actions";
 
 export default async function ArchivedPage() {
   const user = await getCurrentUser();
@@ -43,7 +42,7 @@ export default async function ArchivedPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <ThemeToggle />
-            <NewWebsiteModal action={runAudit} />
+            <CreateFloopLinkDropdown />
             <DashboardNavActions />
           </div>
         </div>
@@ -62,6 +61,7 @@ export default async function ArchivedPage() {
                   <TableHead className="w-28 sm:w-32">Date</TableHead>
                   <TableHead className="w-48 sm:w-56">Website</TableHead>
                   <TableHead className="w-48 sm:w-56">User goal</TableHead>
+                  <TableHead className="w-16" />
                 </TableRow>
               </TableHeader>
               <TableBody>

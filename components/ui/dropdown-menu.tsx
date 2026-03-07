@@ -19,7 +19,7 @@ function DropdownMenuTriggerStyled({
   return (
     <DropdownMenuTriggerPrimitive
       className={cn(
-        "flex size-9 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+        "flex size-9 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-zinc-700/50 dark:hover:bg-zinc-300/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
         className
       )}
       {...props}
@@ -36,7 +36,7 @@ function DropdownMenuContentStyled({
     <DropdownMenuContentPrimitive
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[10rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
+        "z-50 min-w-[10rem] overflow-hidden rounded-md border border-input bg-background p-1 text-foreground shadow-xs",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className
       )}
@@ -52,7 +52,7 @@ function DropdownMenuItemStyled({
   return (
     <DropdownMenuItemPrimitive
       className={cn(
-        "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none transition-colors hover:bg-zinc-700/50 dark:hover:bg-zinc-300/50 hover:text-foreground focus:bg-zinc-700/50 dark:focus:bg-zinc-300/50 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className
       )}
       {...props}

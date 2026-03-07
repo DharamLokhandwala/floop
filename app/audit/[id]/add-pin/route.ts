@@ -1,5 +1,6 @@
 import { addUserPin as addPinToDb } from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import type { Pin } from "@/types/audit";
@@ -8,12 +9,16 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  const rows = await prisma.$queryRaw<[{ mode: string | null }]>`
+    SELECT mode FROM Audit WHERE id = ${id}
+  `;
+  const allowAnonymous = rows[0]?.mode === "request_feedback";
   const user = await getCurrentUser();
-  if (!user) {
+  if (!allowAnonymous && !user) {
     return NextResponse.json({ error: "Sign in to add a comment" }, { status: 401 });
   }
   try {
-    const { id } = await params;
     const body = await request.json();
 
     const pin: Pin = {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 
 function getPagePath(pin: Pin): string {
   return (pin.pageUrl || "").replace(/\/$/, "") || "/";
@@ -15,6 +15,7 @@ import { LiveAuditView } from "@/components/LiveAuditView";
 import { FeedbackSidebar } from "@/components/FeedbackSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ShareModal } from "@/components/ShareModal";
+import { ShareFeedbackLinkModal } from "@/components/ShareFeedbackLinkModal";
 import { LoginForm } from "@/components/LoginForm";
 import type { Pin } from "@/types/audit";
 
@@ -30,6 +31,9 @@ interface AuditPageClientProps {
   isOwner: boolean;
   isAuthenticated?: boolean;
   sharedByName?: string | null;
+  allowAnonymousComments?: boolean;
+  linkCreated?: boolean;
+  isRequestFeedback?: boolean;
 }
 
 function buildAllPins(pins: Pin[], userPins: Pin[]): (Pin & { index: number })[] {
@@ -43,6 +47,7 @@ export function AuditPageClient({
   auditId,
   url,
   goal,
+  screenshotUrl,
   pins,
   userPins,
   createdAt,
@@ -50,15 +55,57 @@ export function AuditPageClient({
   isOwner,
   isAuthenticated = true,
   sharedByName,
+  allowAnonymousComments = false,
+  linkCreated = false,
+  isRequestFeedback = false,
 }: AuditPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [linkCreatedModalOpen, setLinkCreatedModalOpen] = useState(linkCreated && isOwner && isRequestFeedback);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const initialPath = searchParams.get("path") ?? "";
   const isSharedView = searchParams.get("view") === "shared";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedPinIndex, setSelectedPinIndex] = useState<number | null>(null);
-  const [commentMode, setCommentMode] = useState(false);
+  const [commentMode, setCommentMode] = useState(allowAnonymousComments);
+  const didAutoCopy = useRef(false);
+
+  useEffect(() => {
+    if (!linkCreated || !isOwner || !isRequestFeedback || didAutoCopy.current || typeof window === "undefined") return;
+    const shareUrl = `${window.location.origin}/audit/${auditId}?view=shared`;
+    navigator.clipboard.writeText(shareUrl).then(
+      () => {
+        didAutoCopy.current = true;
+        toast.success("Link copied to clipboard");
+      },
+      () => {}
+    );
+  }, [linkCreated, isOwner, isRequestFeedback, auditId]);
+
+  // Keyboard shortcuts: I = Interact, C = Comment (ignore when focus is in an input)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      const isInputFocused =
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          (el as HTMLElement).isContentEditable);
+      if (isInputFocused) return;
+
+      const key = e.key.toLowerCase();
+      if (key === "i") {
+        e.preventDefault();
+        setCommentMode(false);
+      } else if (key === "c") {
+        e.preventDefault();
+        setCommentMode(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const allPins = useMemo(() => buildAllPins(pins, userPins), [pins, userPins]);
   const highlightPin =
@@ -99,23 +146,31 @@ export function AuditPageClient({
 
   const callbackUrl = `/audit/${auditId}?view=shared`;
 
+  const showLoginOverlay = !isAuthenticated && !allowAnonymousComments;
+  const showOnboardingBlur = allowAnonymousComments && !onboardingDismissed;
+  const blurMain = showLoginOverlay || showOnboardingBlur;
+
   return (
     <div className="min-h-screen flex flex-col bg-background relative">
-      <div className={cn("flex-1 flex flex-col", !isAuthenticated && "blur-sm pointer-events-none select-none")}>
+      <div className={cn("flex-1 flex flex-col", blurMain && "blur-sm pointer-events-none select-none")}>
         <header className="shrink-0 border-b border-border">
           <div className="flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-4 py-2.5 sm:py-3">
-            {isSharedView ? (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/dashboard">Go to dashboard</Link>
-              </Button>
+            {!allowAnonymousComments || isAuthenticated ? (
+              isSharedView ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/dashboard">Go to dashboard</Link>
+                </Button>
+              ) : (
+                <Link
+                  href="/dashboard"
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground shrink-0"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span className="font-medium text-foreground">back</span>
+                </Link>
+              )
             ) : (
-              <Link
-                href="/dashboard"
-                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground shrink-0"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span className="font-medium text-primary">back</span>
-              </Link>
+              <div className="shrink-0" />
             )}
             <div className="flex-1 min-w-0 flex justify-center">
               <button
@@ -128,7 +183,7 @@ export function AuditPageClient({
               </button>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {!isSharedView && isOwner && (
+              {(isOwner || allowAnonymousComments) && (
                 <div className="flex rounded-lg border border-border p-0.5 bg-muted/30">
                   <button
                     type="button"
@@ -140,6 +195,9 @@ export function AuditPageClient({
                   >
                     <MousePointer className="h-4 w-4" />
                     Interact
+                    <kbd className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground border border-border">
+                      I
+                    </kbd>
                   </button>
                   <button
                     type="button"
@@ -151,14 +209,17 @@ export function AuditPageClient({
                   >
                     <MessageSquare className="h-4 w-4" />
                     Comment
+                    <kbd className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground border border-border">
+                      C
+                    </kbd>
                   </button>
                 </div>
               )}
-              {isSharedView && isAuthenticated && (
+              {isSharedView && isAuthenticated && !allowAnonymousComments && (
                 <button
                   type="button"
                   onClick={() => setSidebarCollapsed((c) => !c)}
-                  className="inline-flex items-center rounded-lg border border-border px-2.5 py-1.5 text-xs sm:text-sm font-medium text-foreground bg-background hover:bg-muted/50 transition-colors"
+                  className="inline-flex items-center rounded-lg border border-border px-2.5 py-1.5 text-xs sm:text-sm font-medium text-foreground bg-background hover:bg-zinc-700/50 dark:hover:bg-zinc-300/50 transition-colors"
                 >
                   {sidebarCollapsed ? "View feedback" : "Hide feedback"}
                 </button>
@@ -168,6 +229,13 @@ export function AuditPageClient({
                 <Button variant="outline" size="sm" onClick={() => setShareModalOpen(true)}>
                   <LinkIcon className="w-4 h-4 mr-2" />
                   Share
+                </Button>
+              )}
+              {allowAnonymousComments && !isAuthenticated && (
+                <Button asChild variant="default" size="sm">
+                  <Link href={`/signup?callbackUrl=${encodeURIComponent(`/audit/${auditId}?view=shared`)}`}>
+                    Sign up for free
+                  </Link>
                 </Button>
               )}
             </div>
@@ -206,7 +274,7 @@ export function AuditPageClient({
         </main>
       </div>
 
-      {!isAuthenticated && (
+      {showLoginOverlay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-background/40" />
           <div className="relative w-full max-w-sm bg-background border border-border rounded-2xl shadow-2xl p-8">
@@ -216,7 +284,6 @@ export function AuditPageClient({
               </h2>
               <p className="text-sm text-muted-foreground">
                 Sign in to view all the feedbacks
-                  
               </p>
             </div>
             <LoginForm callbackUrl={callbackUrl} />
@@ -224,15 +291,58 @@ export function AuditPageClient({
         </div>
       )}
 
-      {isAuthenticated && (
+      {allowAnonymousComments && !onboardingDismissed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-background/40" />
+          <div className="relative w-full max-w-md bg-background border border-border rounded-2xl shadow-2xl p-8 text-center">
+            <div className="mb-6 flex justify-center">
+              <div className="rounded-xl bg-muted/50 p-8 flex items-center justify-center">
+                <MessageSquare className="h-16 w-16 text-primary/70" aria-hidden />
+              </div>
+            </div>
+            <h2 className="text-xl font-semibold tracking-tight mb-2">
+              Click anywhere to pin your feedback
+            </h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              You can leave feedback on this website without signing in. Click on the page to add a pin and write your comment.
+            </p>
+            <Button
+              onClick={() => setOnboardingDismissed(true)}
+              className="rounded-full font-medium"
+            >
+              Start flooping feedback
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {linkCreatedModalOpen && isOwner && isRequestFeedback && (
+        <ShareFeedbackLinkModal
+          auditId={auditId}
+          open={linkCreatedModalOpen}
+          onOpenChange={setLinkCreatedModalOpen}
+          onSuccess={() => router.refresh()}
+        />
+      )}
+
+      {isAuthenticated && !linkCreatedModalOpen && (
         <ShareModal
           auditId={auditId}
           open={shareModalOpen}
           onOpenChange={setShareModalOpen}
           shareVisibility={shareVisibility}
           onSuccess={() => router.refresh()}
+          screenshotUrl={screenshotUrl}
         />
       )}
+
+      <div className="fixed bottom-4 right-4 z-0 pointer-events-none" aria-hidden>
+        <img
+          src="/floop-recessed-logo.svg"
+          alt=""
+          className="h-10 w-auto opacity-100"
+        />
+      </div>
     </div>
   );
 }

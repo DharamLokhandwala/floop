@@ -49,7 +49,7 @@ export function FeedbackSidebar({
       <button
         type="button"
         onClick={onToggleCollapse}
-        className="flex items-center justify-center h-10 shrink-0 border-b border-border bg-background hover:bg-muted/50"
+        className="flex items-center justify-center h-10 shrink-0 border-b border-border bg-background hover:bg-zinc-700/50 dark:hover:bg-zinc-300/50"
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         {collapsed ? (
@@ -90,13 +90,14 @@ export function FeedbackSidebar({
           </section>
           */}
 
-          {/* Goal */}
-          <section className="rounded-xl border border-border bg-background p-4 shadow-xs">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground block mb-2">
-              Goal
-            </span>
-            <p className="text-sm text-muted-foreground leading-relaxed">{goal}</p>
-          </section>
+          {goal?.trim() && (
+            <section className="rounded-xl border border-border bg-background p-4 shadow-xs">
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground block mb-2">
+                Goal
+              </span>
+              <p className="text-sm text-muted-foreground leading-relaxed">{goal.trim()}</p>
+            </section>
+          )}
 
           {/* Feedback */}
           <section className="rounded-xl border border-border bg-background p-4 shadow-xs">
@@ -119,7 +120,7 @@ export function FeedbackSidebar({
                       "w-full text-left p-3 rounded-lg border transition-colors",
                       selectedPinIndex === pin.index
                         ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-                        : "border-border bg-muted/30 hover:bg-accent"
+                        : "border-border bg-muted/30 hover:bg-zinc-700/50 dark:hover:bg-zinc-300/50"
                     )}
                   >
                     {pin.pageUrl && (() => {

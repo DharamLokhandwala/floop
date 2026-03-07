@@ -16,26 +16,57 @@ type Viewport = { width: number; height: number };
 /**
  * Captures a full-page screenshot of the given URL using Playwright.
  * Runs in Node.js runtime (not Edge) for Playwright compatibility.
+ *
+ * When ignoreHTTPSErrors is true, Playwright will proceed even if the
+ * target website's TLS/SSL certificate is invalid/expired.
  */
-export async function captureScreenshot(url: string): Promise<Buffer> {
-  return captureScreenshotWithViewport(url, { width: 1920, height: 1080 }, true);
+export async function captureScreenshot(
+  url: string,
+  ignoreHTTPSErrors = false
+): Promise<Buffer> {
+  return captureScreenshotWithViewport(
+    url,
+    { width: 1920, height: 1080 },
+    true,
+    ignoreHTTPSErrors
+  );
+}
+
+/**
+ * Captures a viewport-only (hero) screenshot. Use for thumbnails e.g. request-feedback links.
+ */
+export async function captureHeroScreenshot(
+  url: string,
+  ignoreHTTPSErrors = false
+): Promise<Buffer> {
+  return captureScreenshotWithViewport(
+    url,
+    { width: 1920, height: 1080 },
+    false,
+    ignoreHTTPSErrors
+  );
 }
 
 /**
  * Captures a screenshot of the given URL (viewport or full page).
  * Used for comment screenshots so we store what the user saw.
+ *
+ * When ignoreHTTPSErrors is true, Playwright will proceed even if the
+ * target website's TLS/SSL certificate is invalid/expired.
  */
 export async function captureViewportScreenshot(
   url: string,
-  viewport: Viewport
+  viewport: Viewport,
+  ignoreHTTPSErrors = false
 ): Promise<Buffer> {
-  return captureScreenshotWithViewport(url, viewport, false);
+  return captureScreenshotWithViewport(url, viewport, false, ignoreHTTPSErrors);
 }
 
 async function captureScreenshotWithViewport(
   url: string,
   viewport: Viewport,
-  fullPage: boolean
+  fullPage: boolean,
+  ignoreHTTPSErrors: boolean
 ): Promise<Buffer> {
   const launchOptions: Parameters<typeof playwrightChromium.launch>[0] = {
     headless: true,
@@ -65,6 +96,7 @@ async function captureScreenshotWithViewport(
   try {
     const context = await browser.newContext({
       viewport,
+      ignoreHTTPSErrors,
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       locale: "en-US",

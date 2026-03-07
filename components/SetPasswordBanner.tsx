@@ -41,10 +41,10 @@ export function SetPasswordBanner() {
         <KeyRound className="h-5 w-5 shrink-0 text-muted-foreground" />
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">
-            Set a password
+            Looks like you're new here!
           </p>
           
-            Important: Set password so you can sign in with email and password next time.
+            Set password so you can sign in with email and password next time.
           
         </div>
       </div>
