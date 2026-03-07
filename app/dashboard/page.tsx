@@ -71,7 +71,7 @@ export default async function DashboardPage({
             <p className="text-muted-foreground mb-4 text-sm sm:text-base">
               {tab === "given"
                 ? "No floops given yet. Give feedback or check shared links."
-                : "No feedback links yet. Create one and share it with reviewers!"}
+                : "Incredible websites are built with feedbacks. Create your first floop link for feedbacks!"}
             </p>
             <CreateFloopLinkDropdown />
           </div>
