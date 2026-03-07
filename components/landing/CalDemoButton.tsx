@@ -26,7 +26,10 @@ export function CalDemoButton() {
     (async function () {
       const cal = await getCalApi({ namespace: CAL_NAMESPACE });
       cal("ui", {
-        cssVarsPerTheme: { light: { "cal-brand": "#3a3cff" } },
+        cssVarsPerTheme: {
+          light: { "cal-brand": "#3a3cff" },
+          dark: { "cal-brand": "#4446ff" },
+        },
         hideEventTypeDetails: false,
         layout: "month_view",
       });
