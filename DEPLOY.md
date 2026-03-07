@@ -6,7 +6,9 @@ Steps to deploy this Next.js app to production (e.g. Vercel) and set up the data
 
 ## 1. Database (production)
 
-The app uses **SQLite** locally and **Turso** (libSQL) in production when `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are set.
+The app uses **SQLite** locally (`DATABASE_URL`) and **Turso** in production. In production it reads **only** `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (see `lib/db.ts`). You do **not** need to set `DATABASE_URL` in Vercel.
+
+Prisma’s schema uses `DATABASE_URL` for the **CLI** (e.g. `migrate deploy`). So to run migrations against Turso, you set `DATABASE_URL` to your Turso URL **only when running the migrate command** (see below).
 
 ### Option A: Turso (recommended for Vercel)
 
@@ -18,25 +20,12 @@ The app uses **SQLite** locally and **Turso** (libSQL) in production when `TURSO
      - **Auth token** (create one if needed).
 
 2. **Run Prisma migrations against Turso**
-   - Locally, point Prisma at Turso so migrations apply to the production DB. Use either the plain URL (and set `TURSO_AUTH_TOKEN` if your Prisma version uses it for migrate) or a URL that includes the token:
+   - Prisma’s SQLite provider only accepts `file:` URLs, so use the project’s Turso migration script (reads `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` from `.env`):
      ```bash
-     # Option 1: URL + token in env (replace with your values)
-     set DATABASE_URL=libsql://your-db-name-your-org.turso.io
-     set TURSO_AUTH_TOKEN=your-auth-token
-     npx prisma migrate deploy
+     node scripts/migrate-turso.mjs
      ```
-     ```powershell
-     # Windows PowerShell
-     $env:DATABASE_URL="libsql://your-db-name-your-org.turso.io"
-     $env:TURSO_AUTH_TOKEN="your-auth-token"
-     npx prisma migrate deploy
-     ```
-     If migrate does not pick up the token, use a single URL (Option 2):
-     ```bash
-     set DATABASE_URL=libsql://your-db-name-your-org.turso.io?authToken=your-auth-token
-     npx prisma migrate deploy
-     ```
-   - This applies all migrations in `prisma/migrations/`. No new schema or migrations are required for the current codebase.
+   - The script creates `_prisma_migrations` if needed, baselines any migrations already reflected in the DB, then runs only pending migrations.
+   - After that, your local `.env` can keep `DATABASE_URL` for SQLite; Vercel only needs `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
 
 ### Option B: Keep using SQLite in production
 
@@ -54,9 +43,9 @@ Set these in your hosting dashboard (e.g. Vercel → Project → Settings → En
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Local only | SQLite path, e.g. `file:./dev.sqlite`. Not used in production when Turso is used. |
-| `TURSO_DATABASE_URL` | Yes (prod with Turso) | Turso database URL, e.g. `libsql://your-db.turso.io`. |
-| `TURSO_AUTH_TOKEN` | Yes (prod with Turso) | Turso auth token. |
+| `DATABASE_URL` | Local dev only | SQLite path, e.g. `file:./dev.sqlite`. **Do not set in Vercel**; the app uses `TURSO_DATABASE_URL` in production. (Only set `DATABASE_URL` temporarily when running `prisma migrate deploy` against Turso.) |
+| `TURSO_DATABASE_URL` | Yes (prod) | Turso database URL, e.g. `libsql://your-db.turso.io`. This is what the app uses in production. |
+| `TURSO_AUTH_TOKEN` | Yes (prod) | Turso auth token. |
 | `NEXTAUTH_URL` | Yes | Your app URL, e.g. `https://your-domain.com`. |
 | `NEXTAUTH_SECRET` | Yes | Random secret for NextAuth (e.g. `openssl rand -base64 32`). |
 | `BLOB_READ_WRITE_TOKEN` | Yes | Vercel Blob token (Dashboard → Storage → Create store → token). Used for screenshots. |
