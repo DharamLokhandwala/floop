@@ -63,11 +63,49 @@ export const authOptions: NextAuthOptions = {
           console.error("RESEND_API_KEY is not set");
           throw new Error("Email is not configured. Please set RESEND_API_KEY.");
         }
+        const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+        const logoUrl = `${baseUrl.replace(/\/$/, "")}/floop-thin.png`;
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in to floop</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 440px; background-color:#ffffff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="padding: 40px 32px;">
+              <img src="${logoUrl}" alt="floop logo" width="120" height="120" style="display:block; margin:0 0 24px 0; width:120px; height:120px; object-fit:contain;" />
+              <h1 style="margin:0 0 12px 0; font-size: 18px; font-weight: 600; color:#141414; line-height: 1.4;">Sign in to floop</h1>
+              <p style="margin:0 0 24px 0; font-size: 15px; color:#737373; line-height: 1.5;">One click away from flooping your website. Click the button below to sign in. This link is set to expire in 24 hours (tick tick).</p>
+              <table role="presentation" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="border-radius: 8px; background-color:#3a3cff;">
+                    <a href="${url}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 14px 24px; font-size: 15px; font-weight: 500; color:#ffffff; text-decoration: none;">Sign in</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 24px 0 0 0; font-size: 13px; color:#a3a3a3;">If the button doesn't work, copy and paste this link into your browser:</p>
+              <p style="margin: 6px 0 0 0; font-size: 13px; word-break: break-all;"><a href="${url}" style="color:#3a3cff; text-decoration: none;">${url}</a></p>
+            </td>
+          </tr>
+        </table>
+        <p style="margin: 24px 0 0 0; font-size: 12px; color:#a3a3a3;">Website feedback and iterations made easier.</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
         const { data, error } = await resend.emails.send({
           from: fromEmail,
           to: email,
           subject: "Sign in to your account",
-          html: `<p>Click the link below to sign in:</p><p><a href="${url}">${url}</a></p><p>This link expires in 24 hours.</p>`,
+          html,
         });
         if (error) {
           console.error("Resend send failed:", error);

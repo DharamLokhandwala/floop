@@ -47,8 +47,14 @@ export default async function LoginPage({
           </p>
         </div>
         {showVerifyMessage ? (
-          <div className="rounded-md border border-gray-500 dark:border-border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-            If you don't see the email, check your spam folder or try again.
+          <div className="space-y-4">
+            <div className="rounded-md border border-gray-500 dark:border-border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">Check your email</p>
+              <p className="mt-1">We sent you a sign-in link.</p>
+              <p className="mt-2">Can&apos;t find it? Check your <strong>spam or junk folder</strong>.</p>
+            </div>
+            <p className="text-sm text-muted-foreground text-center">Resend the link</p>
+            <LoginForm callbackUrl={callbackUrl} variant="resend" />
           </div>
         ) : (
           <LoginForm callbackUrl={callbackUrl} />

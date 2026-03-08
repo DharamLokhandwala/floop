@@ -7,11 +7,14 @@ import { Input } from "@/components/ui/input";
 
 type Mode = "password" | "magic";
 
-export function LoginForm({ callbackUrl = "/dashboard" }: { callbackUrl?: string }) {
+type LoginFormProps = { callbackUrl?: string; variant?: "default" | "resend" };
+
+export function LoginForm({ callbackUrl = "/dashboard", variant = "default" }: LoginFormProps) {
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [resendLoading, setResendLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handlePasswordSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -74,7 +77,38 @@ export function LoginForm({ callbackUrl = "/dashboard" }: { callbackUrl?: string
           <p className="text-muted-foreground mt-1">
             We sent a sign-in link to <strong>{email}</strong>. Click the link to continue.
           </p>
+          <p className="text-muted-foreground mt-2">Can&apos;t find it? Check your <strong>spam or junk folder</strong>.</p>
         </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          disabled={resendLoading}
+          onClick={async () => {
+            setResendLoading(true);
+            setError(null);
+            try {
+              const res = await signIn("email", {
+                email: email.trim(),
+                callbackUrl: callbackUrl || "/dashboard",
+                redirect: false,
+              });
+              if (res?.error) {
+                setError(res.error);
+                setStatus("error");
+                return;
+              }
+              setStatus("success");
+            } catch {
+              setError("Something went wrong");
+              setStatus("error");
+            } finally {
+              setResendLoading(false);
+            }
+          }}
+        >
+          {resendLoading ? "Sending…" : "Resend link"}
+        </Button>
         <button
           type="button"
           onClick={() => { setMode("password"); setStatus("idle"); setError(null); }}
@@ -86,7 +120,7 @@ export function LoginForm({ callbackUrl = "/dashboard" }: { callbackUrl?: string
     );
   }
 
-  if (mode === "password") {
+  if (mode === "password" && variant !== "resend") {
     return (
       <div className="space-y-4">
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
@@ -167,16 +201,18 @@ export function LoginForm({ callbackUrl = "/dashboard" }: { callbackUrl?: string
           />
         </div>
         <Button type="submit" className="w-full" disabled={status === "loading"}>
-          {status === "loading" ? "Sending link…" : "Send sign-in link"}
+          {status === "loading" ? (variant === "resend" ? "Sending…" : "Sending link…") : variant === "resend" ? "Resend link" : "Send sign-in link"}
         </Button>
       </form>
-      <button
-        type="button"
-        onClick={() => { setMode("password"); setError(null); setStatus("idle"); }}
-        className="text-sm text-muted-foreground hover:text-foreground w-full text-center"
-      >
-        Sign in with password instead
-      </button>
+      {variant !== "resend" && (
+        <button
+          type="button"
+          onClick={() => { setMode("password"); setError(null); setStatus("idle"); }}
+          className="text-sm text-muted-foreground hover:text-foreground w-full text-center"
+        >
+          Sign in with password instead
+        </button>
+      )}
     </div>
   );
 }
