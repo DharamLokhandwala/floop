@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 type Tab = "requested" | "given";
 
-const PRIMARY_DOT = "#3a3cff";
+const PRIMARY_DOT = "var(--color-floop-blue)";
 
 export function DashboardTabToggle({
   requestedCount,

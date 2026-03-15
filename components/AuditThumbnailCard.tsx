@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
-const PRIMARY_DOT = "#3a3cff";
+const PRIMARY_DOT = "var(--color-floop-blue)";
 
 type AuditThumbnailCardProps = {
   id: string;

@@ -12,7 +12,7 @@ export function CalDemoButton() {
       const cal = await getCalApi({ namespace: CAL_NAMESPACE });
       cal("ui", {
         cssVarsPerTheme: {
-          light: { "cal-brand": "#3a3cff" },
+          light: { "cal-brand": "var(--color-floop-blue)" },
           dark: { "cal-brand": "#4446ff" },
         },
         hideEventTypeDetails: false,

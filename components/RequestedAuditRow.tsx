@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import type { RequestedAuditListItem } from "@/lib/audits";
 
-const PRIMARY_DOT = "#3a3cff";
+const PRIMARY_DOT = "var(--color-floop-blue)";
 
 interface RequestedAuditRowProps {
   audit: RequestedAuditListItem;

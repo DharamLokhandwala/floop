@@ -434,14 +434,14 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     if (!styleEl) {
       styleEl = document.createElement('style');
       styleEl.id = 'audit-viewer-hotspot-styles';
-      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{transform:translate(-50%,-100%) scale(1);box-shadow:0 2px 8px rgba(0,0,0,0.25),0 0 0 2px #fff}50%{transform:translate(-50%,-100%) scale(1.12);box-shadow:0 4px 20px rgba(0,0,0,0.35),0 0 0 4px rgba(255,255,255,0.8)}}.audit-viewer-hotspot{animation:audit-hotspot-pulse 2.2s ease-in-out infinite}.audit-viewer-tooltip-bubble{position:absolute;display:none;max-width:280px;padding:10px 14px;background:#1f2937;color:#f9fafb;font-size:13px;line-height:1.45;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,0.25);z-index:2147483648;pointer-events:none}.audit-viewer-tooltip-bubble::after{content:"";position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid #1f2937}';
+      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{transform:translate(-50%,-100%) scale(1) !important;box-shadow:0 2px 8px rgba(0,0,0,0.25),0 0 0 2px #fff}50%{transform:translate(-50%,-100%) scale(1.12) !important;box-shadow:0 4px 20px rgba(0,0,0,0.35),0 0 0 4px rgba(255,255,255,0.8)}}.audit-viewer-hotspot{display:block !important;width:24px !important;height:24px !important;min-width:24px !important;min-height:24px !important;animation:audit-hotspot-pulse 2.2s ease-in-out infinite !important;opacity:1 !important;visibility:visible !important}.audit-viewer-tooltip-bubble{position:absolute;display:none;max-width:280px;padding:10px 14px;background:#1f2937;color:#f9fafb;font-size:13px;line-height:1.45;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,0.25);z-index:2147483648;pointer-events:none}.audit-viewer-tooltip-bubble::after{content:"";position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid #1f2937}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none !important;}html,body{-ms-overflow-style:none !important;scrollbar-width:none !important;}';
       document.head.appendChild(styleEl);
     }
     wrap = document.createElement('div');
     wrap.id = 'audit-viewer-hotspots';
     var docW = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth || 0);
     var docH = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight || 0);
-    wrap.style.cssText = 'position:absolute;left:0;top:0;width:' + docW + 'px;height:' + docH + 'px;pointer-events:none;z-index:2147483647;';
+    wrap.style.cssText = 'display:block !important;position:absolute;left:0;top:0;width:' + docW + 'px;height:' + docH + 'px;pointer-events:none;z-index:2147483647;';
     var tooltip = document.createElement('div');
     tooltip.id = 'audit-viewer-tooltip';
     tooltip.className = 'audit-viewer-tooltip-bubble';
@@ -498,7 +498,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       var el = document.createElement('div');
       el.className = 'audit-viewer-hotspot';
       el.setAttribute('data-pin-index', String(i));
-      el.style.cssText = 'position:absolute;left:' + leftPx + 'px;top:' + topPx + 'px;transform:translate(-50%,-100%);width:24px;height:24px;border-radius:50%;background:' + (categoryColors[pin.category] || '#3b82f6') + ';border:2px solid #fff;pointer-events:auto;cursor:pointer;';
+      el.style.cssText = 'display:block !important;position:absolute;left:' + leftPx + 'px;top:' + topPx + 'px;transform:translate(-50%,-100%);width:24px !important;height:24px !important;border-radius:50%;background:' + (categoryColors[pin.category] || '#3b82f6') + ' !important;border:2px solid #fff;pointer-events:auto;cursor:pointer;';
       el.setAttribute('data-feedback', pin.feedback || '');
       el.setAttribute('data-category', pin.category || '');
       el.addEventListener('mouseenter', function() {
@@ -581,6 +581,9 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         }
       }
     }
+    if (e.data && e.data.type === 'SCROLL_TO' && typeof e.data.y === 'number') {
+      window.scrollTo({ top: e.data.y, behavior: e.data.behavior || 'auto' });
+    }
   });
   document.addEventListener('click', function(e) {
     if (!commentMode) return;
@@ -610,6 +613,20 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   if (window.parent !== window) {
     var pageUrl = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl ? window.__AUDIT_VIEWER__.pageUrl : window.location.href;
     window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
+    
+    function sendScrollData() {
+      window.parent.postMessage({
+        type: 'AUDIT_SCROLL',
+        scrollTop: window.scrollY || document.documentElement.scrollTop,
+        scrollHeight: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight || 0),
+        clientHeight: window.innerHeight || document.documentElement.clientHeight,
+      }, '*');
+    }
+    window.addEventListener('scroll', sendScrollData, { passive: true });
+    window.addEventListener('resize', sendScrollData, { passive: true });
+    
+    // Initial scroll data
+    setTimeout(sendScrollData, 500);
   }
 })();
 </script>`;

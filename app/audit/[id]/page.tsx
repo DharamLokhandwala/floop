@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import {
   getAuditById,
   canViewAudit,
@@ -31,42 +31,33 @@ export default async function AuditPage({ params, searchParams }: PageProps) {
   const user = await getCurrentUser();
 
   if (!user) {
-    if (shareVisibility === "public") {
-      let sharedByName: string | null = null;
-      if (audit.createdById) {
-        const creator = await prisma.user.findUnique({
-          where: { id: audit.createdById },
-          select: { name: true, email: true },
-        });
-        if (creator) sharedByName = creator.name || creator.email || null;
-      }
-
-      return (
-        <AuditPageClient
-          auditId={id}
-          url={audit.url}
-          goal={audit.goal}
-          screenshotUrl={audit.screenshotUrl}
-          pins={audit.pins}
-          userPins={audit.userPins}
-          createdAt={audit.createdAt}
-          shareVisibility={shareVisibility}
-          isOwner={false}
-          isAuthenticated={false}
-          sharedByName={sharedByName}
-          allowAnonymousComments={isRequestFeedback}
-          linkCreated={false}
-          isRequestFeedback={isRequestFeedback}
-        />
-      );
+    let sharedByName: string | null = null;
+    if (audit.createdById) {
+      const creator = await prisma.user.findUnique({
+        where: { id: audit.createdById },
+        select: { name: true, email: true },
+      });
+      if (creator) sharedByName = creator.name || creator.email || null;
     }
 
-    const callbackUrl = `/audit/${id}?view=shared`;
-    const search = new URLSearchParams({
-      callbackUrl,
-      fromAuditId: id,
-    }).toString();
-    redirect(`/login?${search}`);
+    return (
+      <AuditPageClient
+        auditId={id}
+        url={audit.url}
+        goal={audit.goal}
+        screenshotUrl={audit.screenshotUrl}
+        pins={audit.pins}
+        userPins={audit.userPins}
+        createdAt={audit.createdAt}
+        shareVisibility={shareVisibility}
+        isOwner={false}
+        isAuthenticated={false}
+        sharedByName={sharedByName}
+        allowAnonymousComments={isRequestFeedback}
+        linkCreated={false}
+        isRequestFeedback={isRequestFeedback}
+      />
+    );
   }
 
   const allowed = await canViewAudit(id, user.id);

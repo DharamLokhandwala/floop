@@ -68,7 +68,9 @@ export function AuditPageClient({
   const isSharedView = searchParams.get("view") === "shared";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedPinIndex, setSelectedPinIndex] = useState<number | null>(null);
-  const [commentMode, setCommentMode] = useState(allowAnonymousComments);
+  const [commentMode, setCommentMode] = useState(
+    allowAnonymousComments && !isSharedView
+  );
   const didAutoCopy = useRef(false);
 
   useEffect(() => {
@@ -152,7 +154,7 @@ export function AuditPageClient({
 
   return (
     <div className="min-h-screen flex flex-col bg-background relative">
-      <div className={cn("flex-1 flex flex-col", blurMain && "blur-sm pointer-events-none select-none")}>
+      <div className={cn("flex-1 flex flex-col", blurMain && "blur-md pointer-events-none select-none")}>
         <header className="shrink-0 border-b border-border">
           <div className="flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-4 py-2.5 sm:py-3">
             {!allowAnonymousComments || isAuthenticated ? (
@@ -276,7 +278,7 @@ export function AuditPageClient({
 
       {showLoginOverlay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-background/40" />
+          <div className="absolute inset-0 bg-background/50 backdrop-blur-md" />
           <div className="relative w-full max-w-sm bg-background border border-border rounded-2xl shadow-2xl p-8">
             <div className="text-center space-y-2 mb-6">
               <h2 className="text-xl font-semibold tracking-tight">

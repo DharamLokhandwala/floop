@@ -168,7 +168,7 @@ export function LoginForm({ callbackUrl = "/dashboard", variant = "default" }: L
           type="button"
           onClick={() => { setMode("magic"); setError(null); setStatus("idle"); }}
           className="text-sm w-full text-center hover:opacity-80"
-          style={{ color: "#3a3cff" }}
+          style={{ color: "var(--color-floop-blue)" }}
         >
           First time? Send me a sign-in link
         </button>

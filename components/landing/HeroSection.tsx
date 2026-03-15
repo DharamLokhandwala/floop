@@ -60,7 +60,7 @@ export function HeroSection() {
   };
 
   return (
-    <section className="relative w-full flex flex-col flex-1 min-h-0 bg-white pb-[52vh] sm:pb-[50vh]">
+    <section className="relative w-full flex flex-col flex-1 min-h-0 bg-white pb-[62vh] sm:pb-[56vh] md:pb-[50vh]">
       <div className="relative z-10 flex-1 flex items-center justify-center min-h-0 px-4 sm:px-6 lg:px-8">
         <div className="w-full max-w-6xl mx-auto">
           <div className="relative z-10 max-w-4xl mx-auto text-center space-y-3 sm:space-y-4">
@@ -116,7 +116,7 @@ export function HeroSection() {
             <img
               src="/landing/website-wirerfame.svg"
               alt="Browser with website and feedback sidebar"
-              className="w-full h-auto max-h-[60vh] object-contain object-bottom"
+              className=" h-auto max-h-[75vh] sm:max-h-[100vh] md:max-h-[60vh] object-contain object-bottom"
               loading="eager"
               decoding="async"
             />

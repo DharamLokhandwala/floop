@@ -16,6 +16,21 @@ function getPinPath(pin: Pin): string {
   }
 }
 
+function pinsMatch(a: Pin, b: Pin): boolean {
+  if (a.pageUrl !== b.pageUrl) return false;
+  if (typeof a.docX === "number" && typeof b.docX === "number" && typeof a.docY === "number" && typeof b.docY === "number") {
+    return Math.abs(a.docX - b.docX) < 2 && Math.abs(a.docY - b.docY) < 2;
+  }
+  return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
+}
+
+const CATEGORY_COLORS: Record<string, string> = {
+  SEO: "#3b82f6",
+  "Visual Design": "#a855f7",
+  CRO: "#22c55e",
+  Feedback: "var(--color-floop-blue)",
+};
+
 interface LiveAuditViewProps {
   auditId: string;
   auditUrl: string;
@@ -59,8 +74,13 @@ export function LiveAuditView({
   const [iframeSrcPath, setIframeSrcPath] = useState(initialPath);
   const [currentPagePath, setCurrentPagePath] = useState(initialPath);
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [optimisticPins, setOptimisticPins] = useState<Pin[]>([]);
   const pendingHighlightRef = useRef<Pin | null>(null);
   const pendingHighlightIndexRef = useRef<number | null>(null);
+
+  const indicatorRef = useRef<HTMLDivElement>(null);
+  const [scrollHeight, setScrollHeight] = useState(0);
+  const [clientHeight, setClientHeight] = useState(0);
 
   const currentPath = useMemo(() => {
     const p = currentPagePath || "/";
@@ -71,6 +91,17 @@ export function LiveAuditView({
     const all = [...pins, ...userPins];
     return all.filter((pin) => getPinPath(pin) === currentPath);
   }, [pins, userPins, currentPath]);
+
+  // Merge server pins with optimistic pins (just-saved, not yet in server response)
+  const pinsForHotspots = useMemo(() => {
+    const fromServer = pinsForCurrentPage;
+    const optimisticOnPage = optimisticPins.filter((p) => getPinPath(p) === currentPath);
+    const merged = [...fromServer];
+    for (const opt of optimisticOnPage) {
+      if (!merged.some((s) => pinsMatch(s, opt))) merged.push(opt);
+    }
+    return merged;
+  }, [pinsForCurrentPage, optimisticPins, currentPath]);
 
   const postToIframe = useCallback(
     (data: unknown) => {
@@ -89,7 +120,7 @@ export function LiveAuditView({
     if (!iframeLoaded) return;
     postToIframe({
       type: "UPDATE_PINS",
-      pins: pinsForCurrentPage.map((p) => ({
+      pins: pinsForHotspots.map((p) => ({
         x: p.x,
         y: p.y,
         category: p.category,
@@ -103,7 +134,14 @@ export function LiveAuditView({
         docY: p.docY,
       })),
     });
-  }, [iframeLoaded, pinsForCurrentPage, postToIframe]);
+  }, [iframeLoaded, pinsForHotspots, postToIframe]);
+
+  // Clear optimistic pins once they appear in server data (after router.refresh)
+  useEffect(() => {
+    setOptimisticPins((prev) =>
+      prev.filter((opt) => !pinsForCurrentPage.some((s) => pinsMatch(s, opt)))
+    );
+  }, [pinsForCurrentPage]);
 
   // Listen for messages from iframe
   useEffect(() => {
@@ -132,6 +170,15 @@ export function LiveAuditView({
           setAnchorPosition(null);
         }
         setModalOpen(true);
+      }
+      if (e.data?.type === "AUDIT_SCROLL") {
+        const { scrollTop, scrollHeight, clientHeight } = e.data;
+        if (indicatorRef.current && scrollHeight > 0) {
+           indicatorRef.current.style.top = `${(scrollTop / scrollHeight) * 100}%`;
+           indicatorRef.current.style.height = `${(clientHeight / scrollHeight) * 100}%`;
+        }
+        setScrollHeight(prev => prev !== scrollHeight ? scrollHeight : prev);
+        setClientHeight(prev => prev !== clientHeight ? clientHeight : prev);
       }
       if (e.data?.type === "AUDIT_VIEWER_READY") {
         try {
@@ -201,6 +248,8 @@ export function LiveAuditView({
     await onSavePin(pin);
     setPendingClick(null);
     setModalOpen(false);
+    // Add optimistically so hotspot appears immediately (before router.refresh completes)
+    setOptimisticPins((prev) => [...prev, pin]);
     onPinSaved?.();
   };
 
@@ -213,23 +262,101 @@ export function LiveAuditView({
 
   return (
     <div className="flex flex-col h-full w-full">
-      <div className="flex-1 min-h-0 rounded-lg border border-border overflow-hidden bg-muted/20 relative">
-        {!iframeLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-muted/30 z-10">
-            <div className="flex flex-col items-center gap-2">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              <span className="text-sm text-muted-foreground">Loading website…</span>
+      <div className="flex-1 min-h-0 flex flex-row rounded-lg border border-border overflow-hidden bg-muted/20 relative">
+        <div className="flex-1 min-w-0 h-full relative">
+          {!iframeLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/30 z-10">
+              <div className="flex flex-col items-center gap-2">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <span className="text-sm text-muted-foreground">Loading website…</span>
+              </div>
             </div>
+          )}
+          <iframe
+            ref={iframeRef}
+            src={iframeSrc}
+            title="Live website"
+            className="w-full h-full min-h-[280px] sm:min-h-[400px] block border-0 bg-white"
+            onLoad={handleIframeLoad}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+          />
+        </div>
+
+        {/* Pin Minimap — VS Code-style scrollbar showing where pins live on the full page */}
+        <div className="w-[28px] shrink-0 bg-background border-l border-border flex flex-col items-center py-2 px-1">
+          <div
+            className="relative w-2.5 h-full shrink-0 rounded-full overflow-hidden"
+            style={{ 
+              opacity: (iframeLoaded && scrollHeight > 0) ? 1 : 0, 
+              pointerEvents: (iframeLoaded && scrollHeight > 0) ? 'auto' : 'none', 
+              transition: 'opacity 0.3s' 
+            }}
+          >
+            {/* Track background */}
+            <div className="absolute inset-0 bg-muted/60 rounded-full" />
+
+            {/* Viewport window indicator */}
+            {scrollHeight > 0 && (
+              <div
+                ref={indicatorRef}
+                className="absolute left-0 right-0 rounded-full bg-foreground/15 border border-foreground/20"
+                style={{
+                  minHeight: '4px'
+                }}
+              />
+            )}
+
+            {/* Clickable overlay — clicking scrolls iframe */}
+            <div
+              className="absolute inset-0 cursor-pointer"
+              onPointerDown={(e) => {
+                 e.currentTarget.setPointerCapture(e.pointerId);
+                 const rect = e.currentTarget.getBoundingClientRect();
+                 const percent = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                 const targetScroll = percent * scrollHeight;
+                 postToIframe({ type: "SCROLL_TO", y: targetScroll - clientHeight / 2, behavior: "smooth" });
+              }}
+              onPointerMove={(e) => {
+                 if (e.buttons === 1) {
+                   const rect = e.currentTarget.getBoundingClientRect();
+                   const percent = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                   const targetScroll = percent * scrollHeight;
+                   postToIframe({ type: "SCROLL_TO", y: targetScroll - clientHeight / 2 });
+                 }
+              }}
+              onPointerUp={(e) => e.currentTarget.releasePointerCapture(e.pointerId)}
+              title="Click or drag to jump to position"
+            />
+
+            {/* Pin dots */}
+            {pinsForHotspots.map((pin, i) => {
+              const docY = typeof pin.docY === 'number'
+                ? pin.docY
+                : (pin.y / 100) * scrollHeight;
+
+              const topPct = scrollHeight > 0
+                ? (docY / scrollHeight) * 100
+                : pin.y;
+                
+              const color = CATEGORY_COLORS[pin.category ?? ''] ?? 'var(--color-floop-blue)';
+              const isSelected = pendingHighlightRef.current === pin || highlightPin === pin;
+              
+              return (
+                <div
+                  key={i}
+                  className="absolute left-0.5 right-0.5 h-1 rounded-full pointer-events-none transition-transform duration-200"
+                  style={{ 
+                     top: `${topPct}%`, 
+                     backgroundColor: color,
+                     transform: isSelected ? 'translateY(-50%) scale(1.8)' : 'translateY(-50%)',
+                     zIndex: isSelected ? 10 : 1,
+                     boxShadow: isSelected ? `0 0 4px ${color}` : 'none'
+                  }}
+                />
+              );
+            })}
           </div>
-        )}
-        <iframe
-          ref={iframeRef}
-          src={iframeSrc}
-          title="Live website"
-          className="w-full h-full min-h-[280px] sm:min-h-[400px] block"
-          onLoad={handleIframeLoad}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-        />
+        </div>
       </div>
 
       <AddPinModal
