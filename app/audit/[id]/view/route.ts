@@ -8,7 +8,7 @@ const ALLOWED_PROTOCOLS = ["https:", "http:"];
  * GET /audit/[id]/view?path=/about -> fetches audit.url + path, rewrites links, injects script.
  *
  * All sub-resource URLs (JS, CSS, fonts, images) pointing to the target origin
- * are rewritten to go through /audit/[id]/asset/… so the browser never makes
+ * are rewritten to go through /audit/[id]/asset/â€¦ so the browser never makes
  * cross-origin requests, avoiding CORS failures for module scripts, fonts, etc.
  */
 export async function GET(
@@ -119,9 +119,9 @@ export async function GET(
   );
 
   // --- Rewrite HTML ---------------------------------------------------------
-  // 1. Rewrite <a> navigation links → view proxy
+  // 1. Rewrite <a> navigation links â†’ view proxy
   html = rewriteNavigationLinks(html, targetUrl.href, auditOrigin, proxyViewBase);
-  // 2. Rewrite full-origin and absolute-path sub-resource URLs → asset proxy
+  // 2. Rewrite full-origin and absolute-path sub-resource URLs â†’ asset proxy
   html = rewriteResourceUrls(html, auditOrigin, assetBase, proxyViewBase, id);
   // 3. Strip attributes that trigger CORS or SRI failures on proxied content
   html = stripCorsAttributes(html);
@@ -157,7 +157,7 @@ export async function GET(
 // ---------------------------------------------------------------------------
 
 /**
- * Rewrites <a href="…"> links that point to the audit origin so navigation
+ * Rewrites <a href="â€¦"> links that point to the audit origin so navigation
  * goes through the view proxy (which fetches + instruments the next page).
  */
 function rewriteNavigationLinks(
@@ -193,8 +193,8 @@ function rewriteNavigationLinks(
 
 /**
  * Rewrites sub-resource URLs so they load through the asset proxy:
- * - Full-origin refs: https://audit-origin/path → assetBase/path
- * - Absolute paths: /path (e.g. /assets/foo.js) → assetBase/path
+ * - Full-origin refs: https://audit-origin/path â†’ assetBase/path
+ * - Absolute paths: /path (e.g. /assets/foo.js) â†’ assetBase/path
  * With <base href="assetBase/">, absolute paths resolve to origin + path = app
  * origin + /path, so we must rewrite "/path" to "/audit/id/asset/path" in HTML.
  */
@@ -209,7 +209,7 @@ function rewriteResourceUrls(
   // Asset path prefix without origin: /audit/{id}/asset
   const assetPathPrefix = `/audit/${auditId}/asset`;
 
-  // 1) Full-origin refs on resource-like tags: https://origin/… → assetBase/…
+  // 1) Full-origin refs on resource-like tags: https://origin/â€¦ â†’ assetBase/â€¦
   html = html.replace(
     new RegExp(
       `(<(?:script|link|img|source|video|audio|embed|object|iframe)\\s[^>]*?(?:src|href|srcset|poster|content|data-src)\\s*=\\s*["'])${escaped}(/[^"']*)`,
@@ -218,7 +218,7 @@ function rewriteResourceUrls(
     (_m, prefix, path) => `${prefix}${assetBase}${path}`
   );
 
-  // 2) Absolute-path refs on same tags: "/path" → "/audit/id/asset/path"
+  // 2) Absolute-path refs on same tags: "/path" â†’ "/audit/id/asset/path"
   //    so the browser requests our proxy instead of localhost:3000/path
   html = html.replace(
     /(<(?:script|link|img|source|video|audio|embed|object|iframe)\s[^>]*?(?:src|href|srcset|poster|content|data-src)\s*=\s*["'])(\/[^"']*)/gi,
@@ -277,7 +277,7 @@ function rewriteResourceUrls(
     }
   );
 
-  // 5) form action (same-origin) → view proxy so submissions stay in proxy
+  // 5) form action (same-origin) â†’ view proxy so submissions stay in proxy
   html = html.replace(
     /(<form\s[^>]*?\saction\s*=\s*["'])(\/[^"']*)(["'])/gi,
     (_m, prefix, path, suffix) => {
@@ -286,7 +286,7 @@ function rewriteResourceUrls(
     }
   );
 
-  // 6) meta content (og:image, etc.) same-origin URLs → asset proxy
+  // 6) meta content (og:image, etc.) same-origin URLs â†’ asset proxy
   html = html.replace(
     new RegExp(
       `(<meta\\s[^>]*?content\\s*=\\s*["'])${escaped}(/[^"']*)(["'])`,
@@ -414,6 +414,8 @@ interface PinForScript {
   viewportHeight?: number;
   scrollX?: number;
   scrollY?: number;
+  docX?: number;
+  docY?: number;
 }
 
 function getViewerScript(auditId: string, pageUrl: string, pins: PinForScript[]): string {
@@ -423,105 +425,280 @@ function getViewerScript(auditId: string, pageUrl: string, pins: PinForScript[])
 window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson} };
 (function() {
   var commentMode = false;
-  var pinPositions = [];
+  var hotspotElements = [];
   var categoryColors = { SEO: '#3b82f6', 'Visual Design': '#a855f7', CRO: '#22c55e', Feedback: '#3A3CFF' };
+
+  /* â”€â”€ Hover highlight overlay for comment mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  var hoverOverlay = null;
+  var lastHoveredEl = null;
+
+  function createHoverOverlay() {
+    if (hoverOverlay) return;
+    hoverOverlay = document.createElement('div');
+    hoverOverlay.id = 'audit-comment-hover-overlay';
+    hoverOverlay.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #3A3CFF;border-radius:4px;background:rgba(58,60,255,0.08);transition:left 0.08s ease-out,top 0.08s ease-out,width 0.08s ease-out,height 0.08s ease-out;display:none;';
+    document.documentElement.appendChild(hoverOverlay);
+  }
+
+  function updateHoverOverlay(el) {
+    if (!hoverOverlay || !el) { hideHoverOverlay(); return; }
+    try {
+      if (el.id === 'audit-viewer-hotspots' || el.id === 'audit-comment-hover-overlay' || el.id === 'audit-viewer-tooltip' || el.closest('#audit-viewer-hotspots') || el.classList.contains('audit-viewer-hotspot')) {
+        hideHoverOverlay(); return;
+      }
+    } catch(ex) {}
+    var r = el.getBoundingClientRect();
+    hoverOverlay.style.left = r.left + 'px';
+    hoverOverlay.style.top = r.top + 'px';
+    hoverOverlay.style.width = r.width + 'px';
+    hoverOverlay.style.height = r.height + 'px';
+    hoverOverlay.style.display = 'block';
+    lastHoveredEl = el;
+  }
+
+  function hideHoverOverlay() {
+    if (hoverOverlay) hoverOverlay.style.display = 'none';
+    lastHoveredEl = null;
+  }
+
+  document.addEventListener('mousemove', function(e) {
+    if (!commentMode) { hideHoverOverlay(); return; }
+    createHoverOverlay();
+    var wasDisplay = hoverOverlay ? hoverOverlay.style.display : '';
+    if (hoverOverlay) hoverOverlay.style.display = 'none';
+    var target = document.elementFromPoint(e.clientX, e.clientY);
+    if (hoverOverlay) hoverOverlay.style.display = wasDisplay;
+    if (!target) return;
+    try {
+      if (target.id === 'audit-viewer-hotspots' || target.id === 'audit-comment-hover-overlay' || target.id === 'audit-viewer-tooltip' || target.closest('#audit-viewer-hotspots') || target.classList.contains('audit-viewer-hotspot')) return;
+    } catch(ex) {}
+    if (target === lastHoveredEl) return;
+    var meaningful = target;
+    while (meaningful && meaningful !== document.body && meaningful !== document.documentElement) {
+      var tag = meaningful.tagName;
+      if (tag === 'A' || tag === 'BUTTON' || tag === 'IMG' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'VIDEO' ||
+          tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4' || tag === 'H5' || tag === 'H6' ||
+          tag === 'P' || tag === 'LI' || tag === 'TD' || tag === 'TH' || tag === 'SECTION' || tag === 'ARTICLE' ||
+          tag === 'NAV' || tag === 'HEADER' || tag === 'FOOTER' || tag === 'MAIN' || tag === 'ASIDE' || tag === 'FORM' ||
+          tag === 'FIGURE' || tag === 'BLOCKQUOTE' || tag === 'PRE' || tag === 'CODE' || tag === 'TABLE' || tag === 'UL' || tag === 'OL' ||
+          tag === 'DIV') {
+        if (tag === 'DIV') {
+          var divRect = meaningful.getBoundingClientRect();
+          if (divRect.width > 30 && divRect.height > 30) break;
+        } else break;
+      }
+      var rect = meaningful.getBoundingClientRect();
+      if (rect.width > 20 && rect.height > 20) break;
+      meaningful = meaningful.parentElement;
+    }
+    if (!meaningful || meaningful === document.body || meaningful === document.documentElement) meaningful = target;
+    updateHoverOverlay(meaningful);
+  }, { passive: true });
+
+  document.addEventListener('mouseleave', function() { hideHoverOverlay(); });
+
+  /* â”€â”€ Find the actual scroll container â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   * Many modern sites (React/Next.js) don't scroll the window â€”
+   * they scroll an inner div. We need to find it so we can compute
+   * document-level positions properly.
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  function findScrollContainer() {
+    // First check if the normal window scrolls
+    if (document.documentElement.scrollHeight > document.documentElement.clientHeight + 10) {
+      return null; // window is the scroll container
+    }
+    // Walk the DOM looking for the first oversized scrollable container
+    var candidates = document.querySelectorAll('div, main, section');
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      var style = window.getComputedStyle(el);
+      var overflowY = style.overflowY;
+      if ((overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') && el.scrollHeight > el.clientHeight + 10) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  /* â”€â”€ Resolve a pin to its target DOM element â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  function resolveTargetElement(pin) {
+    if (pin.selector) {
+      try {
+        var el = document.querySelector(pin.selector);
+        if (el) return el;
+      } catch(e) {}
+    }
+    return null;
+  }
+
+  /* â”€â”€ Compute viewport-relative position for a pin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  function computePinViewportPosition(pin, scrollContainer) {
+    // Try to anchor to DOM element first (most robust)
+    var target = resolveTargetElement(pin);
+    if (target) {
+      var r = target.getBoundingClientRect();
+      return { vx: r.left + r.width / 2, vy: r.top, visible: true };
+    }
+    // Fall back to saved coordinates
+    if (scrollContainer) {
+      // The pin's docX/docY are in the scroll container's coordinate space
+      var containerRect = scrollContainer.getBoundingClientRect();
+      if (typeof pin.docX === 'number' && typeof pin.docY === 'number') {
+        var vx = containerRect.left + pin.docX - scrollContainer.scrollLeft;
+        var vy = containerRect.top + pin.docY - scrollContainer.scrollTop;
+        return { vx: vx, vy: vy, visible: true };
+      }
+      if (pin.scrollX != null && pin.scrollY != null && pin.viewportWidth && pin.viewportHeight) {
+        var docPx = pin.scrollX + (pin.x / 100) * pin.viewportWidth;
+        var docPy = pin.scrollY + (pin.y / 100) * pin.viewportHeight;
+        var vx2 = containerRect.left + docPx - scrollContainer.scrollLeft;
+        var vy2 = containerRect.top + docPy - scrollContainer.scrollTop;
+        return { vx: vx2, vy: vy2, visible: true };
+      }
+    } else {
+      // Window is the scroll container
+      if (typeof pin.docX === 'number' && typeof pin.docY === 'number') {
+        return { vx: pin.docX - window.scrollX, vy: pin.docY - window.scrollY, visible: true };
+      }
+      if (pin.scrollX != null && pin.scrollY != null && pin.viewportWidth && pin.viewportHeight) {
+        var dx = pin.scrollX + (pin.x / 100) * pin.viewportWidth;
+        var dy = pin.scrollY + (pin.y / 100) * pin.viewportHeight;
+        return { vx: dx - window.scrollX, vy: dy - window.scrollY, visible: true };
+      }
+      // Percentage-based fallback
+      var docW = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth || 0);
+      var docH = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight || 0);
+      var fdx = (pin.x / 100) * docW;
+      var fdy = (pin.y / 100) * docH;
+      return { vx: fdx - window.scrollX, vy: fdy - window.scrollY, visible: true };
+    }
+    return { vx: 0, vy: 0, visible: false };
+  }
+
+  /* â”€â”€ Tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  var tooltipEl = null;
+  var activeTooltipIndex = -1;
+
+  function ensureTooltip() {
+    if (tooltipEl) return;
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = 'audit-viewer-tooltip';
+    tooltipEl.style.cssText = 'position:fixed;display:none;max-width:280px;padding:10px 14px;background:#1f2937;color:#f9fafb;font-size:13px;line-height:1.45;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,0.25);z-index:2147483648;pointer-events:none;';
+    document.documentElement.appendChild(tooltipEl);
+  }
+
+  function showTooltip(pin, i, vx, vy) {
+    ensureTooltip();
+    activeTooltipIndex = i;
+    var cat = pin.category ? '<div style="font-size:11px;opacity:0.9;margin-bottom:4px;text-transform:uppercase;">' + pin.category + '</div>' : '';
+    var text = (pin.feedback || 'Comment ' + (i + 1)).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    tooltipEl.innerHTML = cat + '<div>' + text + '</div>';
+    tooltipEl.style.display = 'block';
+    tooltipEl.style.left = vx + 'px';
+    tooltipEl.style.top = (vy - 10) + 'px';
+    tooltipEl.style.transform = 'translate(-50%, -100%)';
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) tooltipEl.style.display = 'none';
+    activeTooltipIndex = -1;
+  }
+
+  /* â”€â”€ Continuous repositioning of hotspots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   * Use requestAnimationFrame to continuously reposition all pins.
+   * This handles ALL scroll containers, transforms, and layout changes
+   * without needing to know the scroll container ahead of time.
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  var rafId = null;
+  var cachedScrollContainer = undefined; // undefined = not yet computed
+
+  function updateAllPositions() {
+    var pins = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pins;
+    if (!pins) { rafId = requestAnimationFrame(updateAllPositions); return; }
+    if (cachedScrollContainer === undefined) cachedScrollContainer = findScrollContainer();
+    for (var i = 0; i < hotspotElements.length; i++) {
+      var el = hotspotElements[i];
+      if (!el) continue;
+      var pos = computePinViewportPosition(pins[i], cachedScrollContainer);
+      el.style.left = pos.vx + 'px';
+      el.style.top = pos.vy + 'px';
+      // Hide pins that are off-screen
+      if (pos.vx < -50 || pos.vx > window.innerWidth + 50 || pos.vy < -50 || pos.vy > window.innerHeight + 50) {
+        el.style.opacity = '0';
+      } else {
+        el.style.opacity = '1';
+      }
+    }
+    // Update tooltip position if shown
+    if (activeTooltipIndex >= 0 && tooltipEl && tooltipEl.style.display !== 'none' && pins[activeTooltipIndex]) {
+      var tpos = computePinViewportPosition(pins[activeTooltipIndex], cachedScrollContainer);
+      tooltipEl.style.left = tpos.vx + 'px';
+      tooltipEl.style.top = (tpos.vy - 10) + 'px';
+    }
+    rafId = requestAnimationFrame(updateAllPositions);
+  }
+
+  /* â”€â”€ Render hotspots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  function cleanupHotspots() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    hotspotElements.forEach(function(el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
+    hotspotElements = [];
+    if (tooltipEl && tooltipEl.parentNode) tooltipEl.parentNode.removeChild(tooltipEl);
+    tooltipEl = null;
+    activeTooltipIndex = -1;
+  }
+
   function renderHotspots() {
+    // ALWAYS clean up old hotspots first (even if new pins are empty)
+    cleanupHotspots();
     var pins = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pins;
     if (!pins || !pins.length) return;
-    var wrap = document.getElementById('audit-viewer-hotspots');
-    if (wrap) return;
+
+
+    // Inject styles
     var styleEl = document.getElementById('audit-viewer-hotspot-styles');
     if (!styleEl) {
       styleEl = document.createElement('style');
       styleEl.id = 'audit-viewer-hotspot-styles';
-      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{transform:translate(-50%,-100%) scale(1) !important;box-shadow:0 2px 8px rgba(0,0,0,0.25),0 0 0 2px #fff}50%{transform:translate(-50%,-100%) scale(1.12) !important;box-shadow:0 4px 20px rgba(0,0,0,0.35),0 0 0 4px rgba(255,255,255,0.8)}}.audit-viewer-hotspot{display:block !important;width:24px !important;height:24px !important;min-width:24px !important;min-height:24px !important;animation:audit-hotspot-pulse 2.2s ease-in-out infinite !important;opacity:1 !important;visibility:visible !important}.audit-viewer-tooltip-bubble{position:absolute;display:none;max-width:280px;padding:10px 14px;background:#1f2937;color:#f9fafb;font-size:13px;line-height:1.45;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,0.25);z-index:2147483648;pointer-events:none}.audit-viewer-tooltip-bubble::after{content:"";position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid #1f2937}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none !important;}html,body{-ms-overflow-style:none !important;scrollbar-width:none !important;}';
+      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{box-shadow:0 2px 8px rgba(0,0,0,0.25),0 0 0 2px #fff}50%{box-shadow:0 4px 20px rgba(0,0,0,0.35),0 0 0 4px rgba(255,255,255,0.8)}}.audit-viewer-hotspot{display:block !important;width:24px !important;height:24px !important;min-width:24px !important;min-height:24px !important;animation:audit-hotspot-pulse 2.2s ease-in-out infinite !important;opacity:1 !important;visibility:visible !important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none !important;}html,body{-ms-overflow-style:none !important;scrollbar-width:none !important;}';
       document.head.appendChild(styleEl);
     }
-    wrap = document.createElement('div');
-    wrap.id = 'audit-viewer-hotspots';
-    var docW = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth || 0);
-    var docH = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight || 0);
-    wrap.style.cssText = 'display:block !important;position:absolute;left:0;top:0;width:' + docW + 'px;height:' + docH + 'px;pointer-events:none;z-index:2147483647;';
-    var tooltip = document.createElement('div');
-    tooltip.id = 'audit-viewer-tooltip';
-    tooltip.className = 'audit-viewer-tooltip-bubble';
-    tooltip.style.cssText = 'display:none;';
-    wrap.appendChild(tooltip);
-    pinPositions = [];
-    var usedPositions = [];
-    var MIN_DIST = 32;
-    function dist(a, b) { return Math.sqrt((a.left - b.left) * (a.left - b.left) + (a.top - b.top) * (a.top - b.top)); }
-    function collides(x, y) {
-      for (var j = 0; j < usedPositions.length; j++) {
-        if (dist({ left: x, top: y }, usedPositions[j]) < MIN_DIST) return true;
-      }
-      return false;
-    }
-    var nudges = [[28,0],[0,28],[-28,0],[0,-28],[28,28],[-28,28],[-28,-28],[28,-28],[56,0],[0,56],[-56,0],[0,-56]];
+    ensureTooltip();
+
+    // Recompute scroll container
+    cachedScrollContainer = findScrollContainer();
+
     pins.forEach(function(pin, i) {
-      var leftPx, topPx;
-      if (typeof pin.docX === 'number' && typeof pin.docY === 'number') {
-        leftPx = pin.docX;
-        topPx = pin.docY;
-      } else if (pin.selector) {
-        try {
-          var target = document.querySelector(pin.selector);
-          if (target) {
-            var r = target.getBoundingClientRect();
-            leftPx = r.left + window.scrollX + r.width / 2;
-            topPx = r.top + window.scrollY;
-          } else {
-            var sx = pin.scrollX != null ? pin.scrollX : 0, sy = pin.scrollY != null ? pin.scrollY : 0;
-            leftPx = sx + (pin.x/100)*(pin.viewportWidth||window.innerWidth); topPx = sy + (pin.y/100)*(pin.viewportHeight||window.innerHeight);
-          }
-        } catch (err) {
-          var sx = pin.scrollX != null ? pin.scrollX : 0, sy = pin.scrollY != null ? pin.scrollY : 0;
-          leftPx = sx + (pin.x/100)*(pin.viewportWidth||window.innerWidth); topPx = sy + (pin.y/100)*(pin.viewportHeight||window.innerHeight);
-        }
-      } else if (pin.scrollX != null && pin.scrollY != null && pin.viewportWidth && pin.viewportHeight) {
-        leftPx = pin.scrollX + (pin.x/100)*pin.viewportWidth;
-        topPx = pin.scrollY + (pin.y/100)*pin.viewportHeight;
-      } else {
-        leftPx = (pin.x/100)*docW;
-        topPx = (pin.y/100)*docH;
-      }
-      while (collides(leftPx, topPx)) {
-        var found = false;
-        for (var k = 0; k < nudges.length; k++) {
-          var nx = leftPx + nudges[k][0], ny = topPx + nudges[k][1];
-          if (!collides(nx, ny)) { leftPx = nx; topPx = ny; found = true; break; }
-        }
-        if (!found) { leftPx += 28; topPx += 0; }
-      }
-      usedPositions.push({ left: leftPx, top: topPx });
-      pinPositions[i] = { leftPx: leftPx, topPx: topPx };
+      var pos = computePinViewportPosition(pin, cachedScrollContainer);
       var el = document.createElement('div');
       el.className = 'audit-viewer-hotspot';
       el.setAttribute('data-pin-index', String(i));
-      el.style.cssText = 'display:block !important;position:absolute;left:' + leftPx + 'px;top:' + topPx + 'px;transform:translate(-50%,-100%);width:24px !important;height:24px !important;border-radius:50%;background:' + (categoryColors[pin.category] || '#3b82f6') + ' !important;border:2px solid #fff;pointer-events:auto;cursor:pointer;';
+      // position:fixed so it respects viewport coordinates
+      el.style.cssText = 'display:block !important;position:fixed;left:' + pos.vx + 'px;top:' + pos.vy + 'px;transform:translate(-50%,-100%);width:24px !important;height:24px !important;border-radius:50%;background:' + (categoryColors[pin.category] || '#3b82f6') + ' !important;border:2px solid #fff;cursor:pointer;z-index:2147483640;';
       el.setAttribute('data-feedback', pin.feedback || '');
       el.setAttribute('data-category', pin.category || '');
       el.addEventListener('mouseenter', function() {
-        var cat = pin.category ? '<div style="font-size:11px;opacity:0.9;margin-bottom:4px;text-transform:uppercase;">' + pin.category + '</div>' : '';
-        var text = (pin.feedback || 'Comment ' + (i + 1)).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        tooltip.innerHTML = cat + '<div>' + text + '</div>';
-        tooltip.style.display = 'block';
-        tooltip.style.left = leftPx + 'px';
-        tooltip.style.top = (topPx - 10) + 'px';
-        tooltip.style.transform = 'translate(-50%, -100%)';
+        var curPos = computePinViewportPosition(pin, cachedScrollContainer);
+        showTooltip(pin, i, curPos.vx, curPos.vy);
       });
       el.addEventListener('mouseleave', function() {
-        tooltip.style.display = 'none';
+        hideTooltip();
       });
-      wrap.appendChild(el);
+      hotspotElements.push(el);
+      document.documentElement.appendChild(el);
     });
-    document.body.appendChild(wrap);
+    // Start the rAF loop
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(updateAllPositions);
   }
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderHotspots);
   else renderHotspots();
+
   function getSelector(el) {
-    if (!el || el === document.body) return null;
-    if (el.id && /^[a-zA-Z][\\w.-]*$/.test(el.id)) return '#' + el.id;
+    if (!el || el === document.body || el === document.documentElement) return null;
+    if (el.id === 'audit-comment-hover-overlay' || el.id === 'audit-viewer-hotspots' || el.id === 'audit-viewer-tooltip' || el.classList.contains('audit-viewer-hotspot')) return null;
+    if (el.id && /^[a-zA-Z][\\\\w.-]*$/.test(el.id)) return '#' + el.id;
     var path = [], e = el;
     while (e && e !== document.body) {
       var tag = e.tagName.toLowerCase();
@@ -533,18 +710,24 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     }
     return path.length ? path.join(' > ') : null;
   }
+
   function updateHotspotsFromPins(newPins) {
-    if (!newPins || !Array.isArray(newPins)) return;
+    if (!newPins || !Array.isArray(newPins)) {
+      // Invalid data — clean up everything
+      cleanupHotspots();
+      return;
+    }
     window.__AUDIT_VIEWER__.pins = newPins;
-    var wrap = document.getElementById('audit-viewer-hotspots');
-    if (wrap) wrap.remove();
     renderHotspots();
   }
+
   window.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'SET_COMMENT_MODE') {
       commentMode = e.data.value;
       document.body.style.cursor = commentMode ? 'crosshair' : '';
       if (document.documentElement) document.documentElement.style.cursor = commentMode ? 'crosshair' : '';
+      if (commentMode) createHoverOverlay();
+      else hideHoverOverlay();
     }
     if (e.data && e.data.type === 'UPDATE_PINS') {
       updateHotspotsFromPins(e.data.pins);
@@ -565,31 +748,35 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     if (e.data && e.data.type === 'SHOW_TOOLTIP' && typeof e.data.pinIndex === 'number') {
       var idx = e.data.pinIndex;
       var pins = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pins;
-      if (pins && pinPositions[idx]) {
-        var pos = pinPositions[idx];
+      if (pins && pins[idx]) {
         var pin = pins[idx];
-        var tooltipEl = document.getElementById('audit-viewer-tooltip');
-        if (tooltipEl) {
-          var cat = pin.category ? '<div style="font-size:11px;opacity:0.9;margin-bottom:4px;text-transform:uppercase;">' + pin.category + '</div>' : '';
-          var text = (pin.feedback || 'Comment ' + (idx + 1)).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          tooltipEl.innerHTML = cat + '<div>' + text + '</div>';
-          tooltipEl.style.display = 'block';
-          tooltipEl.style.left = pos.leftPx + 'px';
-          tooltipEl.style.top = (pos.topPx - 10) + 'px';
-          tooltipEl.style.transform = 'translate(-50%, -100%)';
-          window.scrollTo({ left: Math.max(0, pos.leftPx - window.innerWidth / 2), top: Math.max(0, pos.topPx - 100), behavior: 'smooth' });
+        var pos = computePinViewportPosition(pin, cachedScrollContainer);
+        showTooltip(pin, idx, pos.vx, pos.vy);
+        // Scroll to pin's target element if it has a selector
+        var target = resolveTargetElement(pin);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }
     }
     if (e.data && e.data.type === 'SCROLL_TO' && typeof e.data.y === 'number') {
-      window.scrollTo({ top: e.data.y, behavior: e.data.behavior || 'auto' });
+      // Try scrolling both the window and any inner scroll container
+      var sc = cachedScrollContainer || findScrollContainer();
+      if (sc) sc.scrollTo({ top: e.data.y, behavior: e.data.behavior || 'auto' });
+      else window.scrollTo({ top: e.data.y, behavior: e.data.behavior || 'auto' });
     }
   });
+
   document.addEventListener('click', function(e) {
     if (!commentMode) return;
     e.preventDefault();
     e.stopPropagation();
-    var target = e.target;
+    var target = lastHoveredEl || e.target;
+    if (target && (target.id === 'audit-comment-hover-overlay' || target.id === 'audit-viewer-hotspots' || target.id === 'audit-viewer-tooltip' || target.classList.contains('audit-viewer-hotspot'))) {
+      if (hoverOverlay) hoverOverlay.style.display = 'none';
+      target = document.elementFromPoint(e.clientX, e.clientY);
+      if (hoverOverlay) hoverOverlay.style.display = '';
+    }
     var vw = window.innerWidth, vh = window.innerHeight;
     var x = (e.clientX / vw) * 100;
     var y = (e.clientY / vh) * 100;
@@ -609,26 +796,52 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         scrollY: window.scrollY
       }, '*');
     }
+    hideHoverOverlay();
   }, true);
+
   if (window.parent !== window) {
     var pageUrl = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl ? window.__AUDIT_VIEWER__.pageUrl : window.location.href;
     window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
     
-    function sendScrollData() {
-      window.parent.postMessage({
-        type: 'AUDIT_SCROLL',
+    function findScrollInfo() {
+      var sc = cachedScrollContainer || findScrollContainer();
+      if (sc) {
+        return {
+          scrollTop: sc.scrollTop,
+          scrollHeight: sc.scrollHeight,
+          clientHeight: sc.clientHeight,
+        };
+      }
+      return {
         scrollTop: window.scrollY || document.documentElement.scrollTop,
         scrollHeight: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight || 0),
         clientHeight: window.innerHeight || document.documentElement.clientHeight,
+      };
+    }
+    
+    function sendScrollData() {
+      var info = findScrollInfo();
+      window.parent.postMessage({
+        type: 'AUDIT_SCROLL',
+        scrollTop: info.scrollTop,
+        scrollHeight: info.scrollHeight,
+        clientHeight: info.clientHeight,
       }, '*');
     }
     window.addEventListener('scroll', sendScrollData, { passive: true });
     window.addEventListener('resize', sendScrollData, { passive: true });
-    
-    // Initial scroll data
-    setTimeout(sendScrollData, 500);
+    // Also listen for scroll on inner containers
+    setTimeout(function() {
+      var sc = findScrollContainer();
+      if (sc) {
+        sc.addEventListener('scroll', sendScrollData, { passive: true });
+        cachedScrollContainer = sc;
+      }
+      sendScrollData();
+    }, 500);
   }
 })();
 </script>`;
   return script;
 }
+

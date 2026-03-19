@@ -30,9 +30,17 @@ interface AuditFormProps {
   reviewerNameRequired?: boolean;
   /** Called when action returns successfully with auditId (e.g. request-feedback flow). */
   onSuccess?: (state: RunAuditState) => void;
+  /** Label for the URL field. */
+  urlLabel?: string;
+  /** Placeholder for the URL field. */
+  urlPlaceholder?: string;
+  /** Label for the goal field. */
+  goalLabel?: string;
+  /** Placeholder for the goal field. */
+  goalPlaceholder?: string;
 }
 
-export function AuditForm({ action, submitLabel = "Give feedback", showReviewerName, reviewerNameLabel, reviewerNameRequired = true, onSuccess }: AuditFormProps) {
+export function AuditForm({ action, submitLabel = "Give feedback", showReviewerName, reviewerNameLabel, reviewerNameRequired = true, onSuccess, urlLabel, urlPlaceholder, goalLabel, goalPlaceholder }: AuditFormProps) {
   const [state, formAction, isPending] = useActionState(action, {});
   const formRef = useRef<HTMLFormElement | null>(null);
   const lastAuditIdRef = useRef<string | null>(null);
@@ -92,13 +100,13 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
 
       <div className="space-y-2">
         <label htmlFor="url" className="text-sm font-medium">
-          Website URL
+          {urlLabel ?? "Website link"}
         </label>
         <Input
           id="url"
           name="url"
           type="url"
-          placeholder="https://example.com"
+          placeholder={urlPlaceholder ?? "https://yourwebsite.com"}
           required
           disabled={isPending}
           className="w-full"
@@ -107,12 +115,12 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
 
       <div className="space-y-2">
         <label htmlFor="goal" className="text-sm font-medium">
-          User Goal <span className="text-muted-foreground font-normal">(optional)</span>
+          {goalLabel ?? "What should they focus on?"} <span className="text-muted-foreground font-normal">(optional)</span>
         </label>
         <Textarea
           id="goal"
           name="goal"
-          placeholder="e.g., Increase sign-up conversions, improve mobile UX, optimize for search visibility"
+          placeholder={goalPlaceholder ?? "e.g. Does the hero section communicate clearly? Is the about page convincing?"}
           rows={4}
           disabled={isPending}
           className="w-full resize-none"
@@ -122,14 +130,14 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
       {showReviewerName && (
         <div className="space-y-2">
           <label htmlFor="reviewerName" className="text-sm font-medium">
-            {reviewerNameLabel ?? "Who are you sharing to?"}
-            {reviewerNameRequired && <span className="text-destructive"> *</span>}
+            {reviewerNameLabel ?? "Reviewer name"}
+            {reviewerNameRequired && <span className="text-destructive"> </span>}
           </label>
           <Input
             id="reviewerName"
             name="reviewerName"
             type="text"
-            placeholder="e.g. Alex, Design team"
+            placeholder="e.g. Alex (from Apple)"
             required={reviewerNameRequired}
             disabled={isPending}
             className="w-full"

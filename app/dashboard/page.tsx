@@ -69,45 +69,11 @@ export default async function DashboardPage({
           </div>
         </div>
 
-        {(tab === "given" ? givenList : requestedList).length === 0 ? (
-          <div className="text-center py-10 sm:py-12 flex flex-col items-center">
-            {tab === "requested" ? (
-              <>
-                <div className="flex justify-center mb-6">
-                  <Image
-                    src="/request-floop-emptyState.svg"
-                    alt="Request feedback on your website"
-                    width={560}
-                    height={360}
-                    className="w-full max-w-[560px] h-auto object-contain"
-                    priority
-                  />
-                </div>
-                <CreateFloopLinkDropdown />
-              </>
-            ) : (
-              <>
-                <div className="flex justify-center mb-6">
-                  <Image
-                    src="/floops-given-emptyState.svg"
-                    alt="floop feedback to others' website"
-                    width={560}
-                    height={360}
-                    className="w-full max-w-[560px] h-auto object-contain"
-                    priority
-                  />
-                </div>
-                <CreateFloopLinkDropdown />
-              </>
-            )}
-          </div>
-        ) : (
-          <DashboardAuditView
-            requestedList={requestedList as unknown as { id: string; url: string; goal: string; screenshotUrl: string; createdAt: string; feedbackCount: number; reviewerName?: string | null; newCommentsCount: number }[]}
-            givenList={givenList as unknown as { id: string; url: string; goal: string; screenshotUrl: string; createdAt: string; feedbackCount: number; newCommentsCount: number; isOwner?: boolean; reviewerName?: string | null }[]}
-            tab={tab}
-          />
-        )}
+        <DashboardAuditView
+          requestedList={requestedList as unknown as { id: string; url: string; goal: string; screenshotUrl: string; createdAt: string; feedbackCount: number; reviewerName?: string | null; newCommentsCount: number }[]}
+          givenList={givenList as unknown as { id: string; url: string; goal: string; screenshotUrl: string; createdAt: string; feedbackCount: number; newCommentsCount: number; isOwner?: boolean; reviewerName?: string | null }[]}
+          tab={tab}
+        />
       </div>
     </div>
   );

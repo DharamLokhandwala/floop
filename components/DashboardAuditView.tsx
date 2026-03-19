@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { CreateFloopLinkDropdown } from "@/components/CreateFloopLinkDropdown";
+import { Link as LinkIcon, MessageSquare, MousePointer, Share2, Inbox } from "lucide-react";
+import { HalftoneDots } from "@paper-design/shaders-react";
 import {
   Table,
   TableBody,
@@ -102,56 +105,147 @@ export function DashboardAuditView({
     );
   }, [selectedIds]);
 
+  const isEmpty = tab === "requested" ? requestedList.length === 0 : givenList.length === 0;
+
+  if (isEmpty) {
+    return (
+      <div className="flex flex-col items-center justify-center w-full min-h-[500px] mt-6 dark:bg-card/20 rounded-xl border border-border/50 px-8 pt-16 pb-0 transition-all relative overflow-hidden">
+
+        {/* Halftone / Dithered Background Effect (Paper Shaders) */}
+        <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-xl opacity-60">
+          <HalftoneDots
+            width={1280}
+            height={720}
+            image="/architecture.webp"
+            colorBack="#fafcff"
+            colorFront="#cfd0d3"
+            originalColors={false}
+            type="gooey"
+            grid="hex"
+            inverted={false}
+            size={0.15}
+            radius={1.25}
+            contrast={0.48}
+            grainMixer={0.2}
+            grainOverlay={0.2}
+            grainSize={0.5}
+            fit="cover"
+          />
+        </div>
+
+
+        {/* <h2 className="text-xl md:text-2xl font-semibold tracking-tight text-foreground mb-3 font-display relative z-10">
+          {tab === "requested" ? "Request feedback" : "Given feedbacks"}
+        </h2>
+
+        <div className="max-w-xl text-center text-muted-foreground mb-8 text-sm md:text-base relative z-10">
+          {tab === "requested"
+            ? "Just the start of your zillion iterations."
+            : "You can view all the feedbacks you have given."}
+        </div> */}
+
+        <div className="relative z-10 w-full max-w-4xl mx-auto flex flex-col md:flex-row items-stretch justify-center gap-10 pb-12">
+          {tab === "requested" ? (
+            <>
+              {/* Card 1 */}
+              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
+                <h4 className="text-lg font-medium text-foreground mb-2">Got a site? Let's floop it</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Paste your URL and tell us what kind of feedback you're after.</p>
+                <div className="mt-auto [&_button]:w-full">
+                  <CreateFloopLinkDropdown directAction="request" />
+                </div>
+              </div>
+              {/* Card 2 */}
+              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
+                <h4 className="text-lg font-medium text-foreground mb-2">Actually flooping it</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Send the link. No installs, no logins needed on their end.</p>
+              </div>
+              {/* Card 3 */}
+              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
+                <h4 className="text-lg font-medium text-foreground mb-2">Checkout the feedback</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Feedback pinned to your site. You'll know what they're talking about instantly.</p>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Card 1 */}
+              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
+                <h4 className="text-lg font-medium text-foreground mb-2">Create a floop link</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Create a floop link for the website you want to give feedback to.</p>
+              </div>
+              {/* Card 2 */}
+              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
+                <h4 className="text-lg font-medium text-foreground mb-2">Give feedback</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Click anywhere on the live website to pin comment at that particular location.</p>
+              </div>
+              {/* Card 3 */}
+              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
+                <h4 className="text-lg font-medium text-foreground mb-2">floop it</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-6">floop the feedback by sharing the link with the person you pinned feedback for.</p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (view === "thumbnail") {
     return (
       <>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {tab === "requested"
             ? requestedList.map((audit: SerializedRequested) => {
-                const total = audit.feedbackCount;
-                const delta = audit.newCommentsCount;
-                const hasNew = delta > 0;
-                const commentsLabel = hasNew ? `${total} (+${delta})` : `${total}`;
-                return (
-                  <AuditThumbnailCard
-                    key={audit.id}
-                    id={audit.id}
-                    screenshotUrl={audit.screenshotUrl}
-                    goal={audit.goal}
-                    url={audit.url}
-                    dateFormatted={formatDate(audit.createdAt)}
-                    reviewerName={audit.reviewerName}
-                    commentsLabel={commentsLabel}
-                    hasNewComments={hasNew}
-                    canEdit
-                    selected={selectedIds.has(audit.id)}
-                    onToggleSelect={toggleSelect}
-                  />
-                );
-              })
+              const total = audit.feedbackCount;
+              const delta = audit.newCommentsCount;
+              const hasNew = delta > 0;
+              const commentsLabel = hasNew ? `${total} (+${delta})` : `${total}`;
+              return (
+                <AuditThumbnailCard
+                  key={audit.id}
+                  id={audit.id}
+                  screenshotUrl={audit.screenshotUrl}
+                  goal={audit.goal}
+                  url={audit.url}
+                  dateFormatted={formatDate(audit.createdAt)}
+                  reviewerName={audit.reviewerName}
+                  commentsLabel={commentsLabel}
+                  hasNewComments={hasNew}
+                  canEdit
+                  selected={selectedIds.has(audit.id)}
+                  onToggleSelect={toggleSelect}
+                />
+              );
+            })
             : givenList.map((audit: SerializedShared) => {
-                const isOwner = audit.isOwner !== false;
-                const total = audit.feedbackCount ?? 0;
-                const nc = audit.newCommentsCount ?? 0;
-                const hasNew = nc > 0;
-                const commentsLabel = hasNew ? `${total} (+${nc})` : `${total}`;
-                return (
-                  <AuditThumbnailCard
-                    key={audit.id}
-                    id={audit.id}
-                    screenshotUrl={audit.screenshotUrl}
-                    goal={audit.goal}
-                    url={audit.url}
-                    dateFormatted={formatDate(audit.createdAt)}
-                    reviewerName={audit.reviewerName}
-                    commentsLabel={commentsLabel}
-                    hasNewComments={hasNew}
-                    canEdit={isOwner}
-                    selected={selectedIds.has(audit.id)}
-                    onToggleSelect={isOwner ? toggleSelect : undefined}
-                  />
-                );
-              })}
+              const isOwner = audit.isOwner !== false;
+              const total = audit.feedbackCount ?? 0;
+              const nc = audit.newCommentsCount ?? 0;
+              const hasNew = nc > 0;
+              const commentsLabel = hasNew ? `${total} (+${nc})` : `${total}`;
+              return (
+                <AuditThumbnailCard
+                  key={audit.id}
+                  id={audit.id}
+                  screenshotUrl={audit.screenshotUrl}
+                  goal={audit.goal}
+                  url={audit.url}
+                  dateFormatted={formatDate(audit.createdAt)}
+                  reviewerName={audit.reviewerName}
+                  commentsLabel={commentsLabel}
+                  hasNewComments={hasNew}
+                  canEdit={isOwner}
+                  selected={selectedIds.has(audit.id)}
+                  onToggleSelect={isOwner ? toggleSelect : undefined}
+                />
+              );
+            })}
         </div>
         {selectedIds.size > 0 && (
           <DashboardSelectionBar
@@ -184,34 +278,34 @@ export function DashboardAuditView({
           <TableBody>
             {tab === "requested"
               ? requestedList.map((audit: SerializedRequested) => (
-                  <RequestedAuditRow
-                    key={audit.id}
-                    audit={audit as unknown as RequestedAuditListItem}
-                    dateFormatted={formatRelativeDate(audit.createdAt)}
-                    selected={selectedIds.has(audit.id)}
-                    onToggleSelect={toggleSelect}
-                  />
-                ))
+                <RequestedAuditRow
+                  key={audit.id}
+                  audit={audit as unknown as RequestedAuditListItem}
+                  dateFormatted={formatRelativeDate(audit.createdAt)}
+                  selected={selectedIds.has(audit.id)}
+                  onToggleSelect={toggleSelect}
+                />
+              ))
               : givenList.map((audit: SerializedShared) => {
-                  const isOwner = audit.isOwner !== false;
-                  return (
-                    <AuditTableRow
-                      key={audit.id}
-                      id={audit.id}
-                      href={`/audit/${audit.id}`}
-                      screenshotUrl={audit.screenshotUrl}
-                      dateFormatted={formatRelativeDate(audit.createdAt)}
-                      websiteUrl={audit.url}
-                      goal={audit.goal}
-                      name={audit.reviewerName}
-                      canEdit={isOwner}
-                      feedbackCount={audit.feedbackCount}
-                      newCommentsCount={audit.newCommentsCount}
-                      selected={selectedIds.has(audit.id)}
-                      onToggleSelect={isOwner ? toggleSelect : undefined}
-                    />
-                  );
-                })}
+                const isOwner = audit.isOwner !== false;
+                return (
+                  <AuditTableRow
+                    key={audit.id}
+                    id={audit.id}
+                    href={`/audit/${audit.id}`}
+                    screenshotUrl={audit.screenshotUrl}
+                    dateFormatted={formatRelativeDate(audit.createdAt)}
+                    websiteUrl={audit.url}
+                    goal={audit.goal}
+                    name={audit.reviewerName}
+                    canEdit={isOwner}
+                    feedbackCount={audit.feedbackCount}
+                    newCommentsCount={audit.newCommentsCount}
+                    selected={selectedIds.has(audit.id)}
+                    onToggleSelect={isOwner ? toggleSelect : undefined}
+                  />
+                );
+              })}
           </TableBody>
         </Table>
       </div>

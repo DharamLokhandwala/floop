@@ -143,6 +143,11 @@ export function LiveAuditView({
     );
   }, [pinsForCurrentPage]);
 
+  // Clear optimistic pins when navigating to a different page
+  useEffect(() => {
+    setOptimisticPins([]);
+  }, [currentPath]);
+
   // Listen for messages from iframe
   useEffect(() => {
     const handler = (e: MessageEvent) => {

@@ -21,7 +21,7 @@ import { ShareFeedbackLinkModal } from "@/components/ShareFeedbackLinkModal";
 import { Plus, MessageSquarePlus, Send } from "lucide-react";
 import { runAudit, runRequestFeedbackLink } from "@/app/actions";
 
-export function CreateFloopLinkDropdown() {
+export function CreateFloopLinkDropdown({ directAction }: { directAction?: "request" | "give" } = {}) {
   const router = useRouter();
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [giveModalOpen, setGiveModalOpen] = useState(false);
@@ -39,41 +39,51 @@ export function CreateFloopLinkDropdown() {
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild className="!size-auto !h-auto !w-auto !min-w-0">
-          <Button variant="default" className="shrink-0 bg-primary text-primary-foreground hover:!bg-primary/85 hover:!text-primary-foreground">
-            <Plus className="w-4 h-4 shrink-0" />
-            <span>Create floop link</span>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="p-2">
-          <DropdownMenuItem
-            className="py-2.5"
-            onClick={() => {
-              setRequestModalOpen(true);
-            }}
-          >
-            <MessageSquarePlus className="w-4 h-4 mr-2" />
-            Request feedback
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="py-2.5"
-            onClick={() => {
-              setGiveModalOpen(true);
-            }}
-          >
-            <Send className="w-4 h-4 mr-2" />
-            Give feedback
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {directAction === "request" ? (
+        <Button variant="default" className="w-full bg-blue-600 text-white hover:bg-blue-700" onClick={() => setRequestModalOpen(true)}>
+          Create floop link
+        </Button>
+      ) : directAction === "give" ? (
+        <Button variant="default" className="w-full bg-blue-600 text-white hover:bg-blue-700" onClick={() => setGiveModalOpen(true)}>
+          Give feedback
+        </Button>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild className="size-auto! h-auto! w-auto! min-w-0!">
+            <Button variant="default" className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/85! hover:text-primary-foreground!">
+              <Plus className="w-4 h-4 shrink-0" />
+              <span>Create floop link</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="p-2">
+            <DropdownMenuItem
+              className="py-2.5"
+              onClick={() => {
+                setRequestModalOpen(true);
+              }}
+            >
+              <MessageSquarePlus className="w-4 h-4 mr-2" />
+              Request feedback
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="py-2.5"
+              onClick={() => {
+                setGiveModalOpen(true);
+              }}
+            >
+              <Send className="w-4 h-4 mr-2" />
+              Give feedback
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       <Dialog open={requestModalOpen} onOpenChange={setRequestModalOpen}>
-        <DialogContent>
+        <DialogContent className="border-neutral-300 rounded-2xl sm:rounded-2xl pr-8 pl-8 pt-8 pb-8 gap-6">
           <DialogHeader>
-            <DialogTitle>Get a feedback link</DialogTitle>
+            <DialogTitle>Request feedback</DialogTitle>
             <DialogDescription>
-              Create a link to share with anyone. They can leave feedback on your website without signing in.
+              Request feedback from anyone, they can leave feedback on your website without signing in.
             </DialogDescription>
           </DialogHeader>
           <AuditForm
@@ -111,6 +121,10 @@ export function CreateFloopLinkDropdown() {
             showReviewerName
             reviewerNameLabel="Who are you sending floop to?"
             reviewerNameRequired={false}
+            urlLabel="Website URL"
+            urlPlaceholder="https://example.com"
+            goalLabel="User Goal"
+            goalPlaceholder="e.g., Increase sign-up conversions, improve mobile UX, optimize for search visibility"
           />
         </DialogContent>
       </Dialog>

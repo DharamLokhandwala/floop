@@ -45,7 +45,7 @@ export function DashboardTabToggle({
             : "text-muted-foreground hover:text-foreground"
         )}
       >
-        Floops requested ({requestedCount})
+        Feedback requested ({requestedCount})
         {requestedHasFeedback && (
           <span
             className="rounded-full size-2 shrink-0"
@@ -64,7 +64,7 @@ export function DashboardTabToggle({
             : "text-muted-foreground hover:text-foreground"
         )}
       >
-        Floops given ({givenCount})
+        Feedback given ({givenCount})
         {givenHasNewComments && (
           <span
             className="rounded-full size-2 shrink-0"
