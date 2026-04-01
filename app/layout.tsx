@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { SessionProvider } from "@/components/SessionProvider";
+import { MobileGate } from "@/components/MobileGate";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -44,7 +45,9 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <SessionProvider>
-            <TooltipProvider>{children}</TooltipProvider>
+            <TooltipProvider>
+              <MobileGate>{children}</MobileGate>
+            </TooltipProvider>
           </SessionProvider>
           <Toaster position="top-center" richColors closeButton />
         </ThemeProvider>

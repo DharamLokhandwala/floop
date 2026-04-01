@@ -34,7 +34,7 @@ export default async function DashboardPage({
   if (!user) redirect("/login");
 
   const params = await searchParams;
-  const tab = params.tab === "given" ? "given" : "requested";
+  const tab = params.tab === "requested" ? "requested" : "given";
   const profileComplete = profileCompletionPercent(user);
   const [requestedCount, givenCount, requestedList, givenList] = await Promise.all([
     getRequestedByMeCount(user.id),
@@ -46,7 +46,7 @@ export default async function DashboardPage({
   const givenHasNewComments = givenList.some((a) => a.newCommentsCount > 0);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <div className="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-3 items-end">
         {profileComplete < 100 && (
           <ProfileCompletionBanner completionPercent={profileComplete} />

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Tooltip,
@@ -8,6 +9,8 @@ import {
 } from "@/components/ui/tooltip";
 import { TableRow, TableCell } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { ArchiveRestore } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PRIMARY_DOT = "var(--color-floop-blue)";
@@ -50,6 +53,7 @@ export function AuditTableRow({
   onToggleSelect,
 }: AuditTableRowProps) {
   const router = useRouter();
+  const [restoring, setRestoring] = useState(false);
 
   const total = feedbackCount ?? 0;
   const hasNew = (newCommentsCount ?? 0) > 0;
@@ -57,6 +61,18 @@ export function AuditTableRow({
 
   const handleCellClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+  };
+
+  const handleRestore = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (restoring) return;
+    setRestoring(true);
+    try {
+      await fetch(`/audit/${id}/unarchive`, { method: "POST" });
+      router.refresh();
+    } finally {
+      setRestoring(false);
+    }
   };
 
   return (
@@ -106,14 +122,31 @@ export function AuditTableRow({
             className="shrink-0 px-1 py-1 align-right"
             onClick={handleCellClick}
           >
-            {canEdit && onToggleSelect && (
-              <div className={cn("flex justify-end transition-opacity", selected ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
-                <Checkbox
-                  checked={selected}
-                  onCheckedChange={() => onToggleSelect(id)}
-                  aria-label="Select row"
-                />
+            {archived ? (
+              <div className={cn("flex justify-end transition-opacity", "opacity-0 group-hover:opacity-100")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRestore}
+                  disabled={restoring}
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  aria-label="Restore"
+                >
+                  <ArchiveRestore className="mr-1.5 size-3.5" />
+                  {restoring ? "Restoring…" : "Restore"}
+                </Button>
               </div>
+            ) : (
+              canEdit && onToggleSelect && (
+                <div className={cn("flex justify-end transition-opacity", selected ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
+                  <Checkbox
+                    checked={selected}
+                    onCheckedChange={() => onToggleSelect(id)}
+                    aria-label="Select row"
+                  />
+                </div>
+              )
             )}
           </TableCell>
         </TableRow>

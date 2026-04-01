@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { AddPinModal, type PendingLiveClick } from "@/components/AddPinModal";
+import { InlineCommentInput, type PendingLiveClick } from "@/components/InlineCommentInput";
 import type { Pin } from "@/types/audit";
 
 /** Normalize pin's page to path (pathname + search) for comparison with iframe path */
@@ -51,6 +51,8 @@ interface LiveAuditViewProps {
   onPinSaved?: () => void;
   /** Current path from URL so we can stay on this page after reload */
   initialPath?: string;
+  /** Pin to highlight on hover (persistent outline, no scroll, no tooltip) */
+  hoverHighlightPin?: Pin | null;
 }
 
 export function LiveAuditView({
@@ -59,13 +61,14 @@ export function LiveAuditView({
   pins,
   userPins,
   commentMode,
-  onCommentModeChange: _onCommentModeChange,
+  onCommentModeChange,
   highlightPin,
   highlightPinIndexInPage = null,
   onHighlightDone,
   onSavePin,
   onPinSaved,
   initialPath = "",
+  hoverHighlightPin = null,
 }: LiveAuditViewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [pendingClick, setPendingClick] = useState<PendingLiveClick | null>(null);
@@ -121,6 +124,7 @@ export function LiveAuditView({
     postToIframe({
       type: "UPDATE_PINS",
       pins: pinsForHotspots.map((p) => ({
+        id: p.id,
         x: p.x,
         y: p.y,
         category: p.category,
@@ -132,6 +136,8 @@ export function LiveAuditView({
         scrollY: p.scrollY,
         docX: p.docX,
         docY: p.docY,
+        replies: p.replies,
+        pageUrl: p.pageUrl,
       })),
     });
   }, [iframeLoaded, pinsForHotspots, postToIframe]);
@@ -195,10 +201,16 @@ export function LiveAuditView({
           setCurrentPagePath("/");
         }
       }
+      if (e.data?.type === "CTRL_KEY_STATE") {
+        onCommentModeChange(e.data.held);
+      }
+      if (e.data?.type === "PINS_MUTATED") {
+        onPinSaved?.();
+      }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, []);
+  }, [onCommentModeChange, onPinSaved]);
 
   // When parent asks to highlight a pin: navigate iframe if needed, then send HIGHLIGHT
   useEffect(() => {
@@ -229,6 +241,25 @@ export function LiveAuditView({
     }
   }, [highlightPin, highlightPinIndexInPage, auditId, currentPath, postToIframe, onHighlightDone]);
 
+  useEffect(() => {
+    if (!hoverHighlightPin) {
+      postToIframe({ type: "CLEAR_HIGHLIGHT" });
+      return;
+    }
+    const pinPath = hoverHighlightPin.pageUrl
+      ? new URL(hoverHighlightPin.pageUrl).pathname + new URL(hoverHighlightPin.pageUrl).search
+      : "";
+    if (pinPath && pinPath !== currentPath) return;
+    postToIframe({
+      type: "HIGHLIGHT",
+      selector: hoverHighlightPin.selector || null,
+      x: hoverHighlightPin.x,
+      y: hoverHighlightPin.y,
+      persistent: true,
+      noScroll: true,
+    });
+  }, [hoverHighlightPin, currentPath, postToIframe]);
+
   const handleIframeLoad = useCallback(() => {
     setIframeLoaded(true);
     const pin = pendingHighlightRef.current;
@@ -249,14 +280,15 @@ export function LiveAuditView({
     }
   }, [postToIframe, onHighlightDone]);
 
-  const handleSavePin = async (pin: Pin) => {
-    await onSavePin(pin);
+  const handleSavePin = useCallback(async (pin: Pin) => {
     setPendingClick(null);
     setModalOpen(false);
-    // Add optimistically so hotspot appears immediately (before router.refresh completes)
+    setAnchorPosition(null);
+    // Add optimistically so hotspot appears immediately
     setOptimisticPins((prev) => [...prev, pin]);
+    await onSavePin(pin);
     onPinSaved?.();
-  };
+  }, [onSavePin, onPinSaved]);
 
   const iframeSrc = `/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}`;
 
@@ -267,7 +299,7 @@ export function LiveAuditView({
 
   return (
     <div className="flex flex-col h-full w-full">
-      <div className="flex-1 min-h-0 flex flex-row rounded-lg border border-border overflow-hidden bg-muted/20 relative">
+      <div className="flex-1 min-h-0 flex flex-row rounded-lg border border-border overflow-hidden relative">
         <div className="flex-1 min-w-0 h-full relative">
           {!iframeLoaded && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/30 z-10">
@@ -346,9 +378,9 @@ export function LiveAuditView({
               const color = CATEGORY_COLORS[pin.category ?? ''] ?? 'var(--color-floop-blue)';
               const isSelected = pendingHighlightRef.current === pin || highlightPin === pin;
               
-              return (
+                return (
                 <div
-                  key={i}
+                  key={pin.id ?? `pin-${i}`}
                   className="absolute left-0.5 right-0.5 h-1 rounded-full pointer-events-none transition-transform duration-200"
                   style={{ 
                      top: `${topPct}%`, 
@@ -364,16 +396,17 @@ export function LiveAuditView({
         </div>
       </div>
 
-      <AddPinModal
+      <InlineCommentInput
         open={modalOpen}
-        onOpenChange={(open) => {
-          setModalOpen(open);
-          if (!open) setAnchorPosition(null);
-        }}
-        onSave={handleSavePin}
-        position={null}
-        pendingLiveClick={pendingClick}
         anchorPosition={anchorPosition}
+        pendingClick={pendingClick}
+        auditId={auditId}
+        onSave={handleSavePin}
+        onDismiss={() => {
+          setModalOpen(false);
+          setPendingClick(null);
+          setAnchorPosition(null);
+        }}
       />
     </div>
   );

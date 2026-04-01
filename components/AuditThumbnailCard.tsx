@@ -8,6 +8,8 @@ const PRIMARY_DOT = "var(--color-floop-blue)";
 
 type AuditThumbnailCardProps = {
   id: string;
+  /** Full path to open (defaults to `/audit/{id}`). Use for query params e.g. `?floopTip=1`. */
+  href?: string;
   screenshotUrl: string;
   goal: string;
   url: string;
@@ -24,6 +26,7 @@ type AuditThumbnailCardProps = {
 
 export function AuditThumbnailCard({
   id,
+  href,
   screenshotUrl,
   goal,
   url,
@@ -36,17 +39,18 @@ export function AuditThumbnailCard({
   onToggleSelect,
 }: AuditThumbnailCardProps) {
   const router = useRouter();
+  const navigateHref = href ?? `/audit/${id}`;
 
   return (
     <div
       role="button"
       tabIndex={0}
       className="group relative flex flex-col rounded-lg border border-border bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={() => router.push(`/audit/${id}`)}
+      onClick={() => router.push(navigateHref)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          router.push(`/audit/${id}`);
+          router.push(navigateHref);
         }
       }}
     >

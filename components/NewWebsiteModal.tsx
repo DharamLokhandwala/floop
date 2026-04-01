@@ -2,16 +2,11 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { AuditForm } from "@/app/AuditForm";
 import { Plus } from "lucide-react";
 import type { RunAuditState } from "@/app/actions";
+import { ModalShell } from "@/components/ui/modal-shell";
 
 interface NewWebsiteModalProps {
   action: (prevState: RunAuditState, formData: FormData) => Promise<RunAuditState>;
@@ -32,17 +27,16 @@ export function NewWebsiteModal({
         <Plus className="w-4 h-4 mr-2" />
         {triggerLabel}
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New website</DialogTitle>
-            <DialogDescription>
-              Enter a URL and your goal. We&apos;ll capture a screenshot for you to add manual feedback pins.
-            </DialogDescription>
-          </DialogHeader>
-          <AuditForm action={action} submitLabel="Give Feedback" />
-        </DialogContent>
-      </Dialog>
+
+      <ModalShell open={open} onOpenChange={setOpen}>
+        <DialogHeader className="mb-6">
+          <DialogTitle className="text-xl font-medium">New website</DialogTitle>
+          <DialogDescription>
+            Enter a URL and your goal. We&apos;ll capture a screenshot for you to add manual feedback pins.
+          </DialogDescription>
+        </DialogHeader>
+        <AuditForm action={action} submitLabel="Give Feedback" />
+      </ModalShell>
     </>
   );
 }

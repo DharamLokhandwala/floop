@@ -1,6 +1,86 @@
+import { randomUUID } from "crypto";
 import { prisma } from "./db";
-import type { Pin } from "@/types/audit";
+import type { Pin, PinReply } from "@/types/audit";
 import type { Audit as PrismaAudit } from "@prisma/client";
+
+/** Assign UUIDs to pins missing `id`; persist via getAuditById when changed. */
+export function ensurePinIds(pins: Pin[]): { pins: Pin[]; changed: boolean } {
+  let changed = false;
+  const out = pins.map((p) => {
+    if (p.id && typeof p.id === "string" && p.id.length > 0) return p;
+    changed = true;
+    return { ...p, id: randomUUID() };
+  });
+  return { pins: out, changed };
+}
+
+export type PinBucket = "pins" | "userPins";
+
+export function findPinLocation(
+  aiPins: Pin[],
+  userPins: Pin[],
+  pinId: string
+): { bucket: PinBucket; index: number } | null {
+  const aiIdx = aiPins.findIndex((p) => p.id === pinId);
+  if (aiIdx >= 0) return { bucket: "pins", index: aiIdx };
+  const uIdx = userPins.findIndex((p) => p.id === pinId);
+  if (uIdx >= 0) return { bucket: "userPins", index: uIdx };
+  return null;
+}
+
+export async function appendPinReply(
+  auditId: string,
+  pinId: string,
+  reply: PinReply
+): Promise<void> {
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  if (!audit) throw new Error("Audit not found");
+  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
+  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
+  const loc = findPinLocation(aiPins, userPins, pinId);
+  if (!loc) throw new Error("Pin not found");
+  if (loc.bucket === "pins") {
+    const next = [...aiPins];
+    const pin = { ...next[loc.index] };
+    pin.replies = [...(pin.replies ?? []), reply];
+    next[loc.index] = pin;
+    await prisma.audit.update({
+      where: { id: auditId },
+      data: { pinsJson: JSON.stringify(next) },
+    });
+  } else {
+    const next = [...userPins];
+    const pin = { ...next[loc.index] };
+    pin.replies = [...(pin.replies ?? []), reply];
+    next[loc.index] = pin;
+    await prisma.audit.update({
+      where: { id: auditId },
+      data: { userPinsJson: JSON.stringify(next) },
+    });
+  }
+}
+
+export async function deletePinById(auditId: string, pinId: string): Promise<void> {
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  if (!audit) throw new Error("Audit not found");
+  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
+  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
+  const loc = findPinLocation(aiPins, userPins, pinId);
+  if (!loc) throw new Error("Pin not found");
+  if (loc.bucket === "pins") {
+    const next = aiPins.filter((_, i) => i !== loc.index);
+    await prisma.audit.update({
+      where: { id: auditId },
+      data: { pinsJson: JSON.stringify(next) },
+    });
+  } else {
+    const next = userPins.filter((_, i) => i !== loc.index);
+    await prisma.audit.update({
+      where: { id: auditId },
+      data: { userPinsJson: JSON.stringify(next) },
+    });
+  }
+}
 
 /** Used when reading createdById/shareVisibility/mode so code works even if Prisma client types omit them (e.g. on Vercel). */
 type AuditOwnerFields = { createdById?: string | null; shareVisibility?: string | null; mode?: string | null };
@@ -54,17 +134,27 @@ export async function getAuditById(id: string): Promise<AuditWithPins | null> {
   `;
   const mode = modeRow?.mode ?? "give_feedback";
 
-  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
-  const userPins = audit.userPinsJson
-    ? (JSON.parse(audit.userPinsJson) as Pin[])
-    : [];
+  const rawAi = JSON.parse(audit.pinsJson) as Pin[];
+  const rawUser = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
+  const aiResult = ensurePinIds(rawAi);
+  const userResult = ensurePinIds(rawUser);
+
+  if (aiResult.changed || userResult.changed) {
+    await prisma.audit.update({
+      where: { id },
+      data: {
+        pinsJson: JSON.stringify(aiResult.pins),
+        userPinsJson: JSON.stringify(userResult.pins),
+      },
+    });
+  }
 
   const { pinsJson, userPinsJson, ...rest } = audit;
   return {
     ...rest,
     mode,
-    pins: aiPins,
-    userPins,
+    pins: aiResult.pins,
+    userPins: userResult.pins,
   };
 }
 

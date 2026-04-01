@@ -1,10 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CreateFloopLinkDropdown } from "@/components/CreateFloopLinkDropdown";
 import { Link as LinkIcon, MessageSquare, MousePointer, Share2, Inbox } from "lucide-react";
-import { HalftoneDots } from "@paper-design/shaders-react";
+import {
+  FlowFieldBackground,
+  FLOW_FIELD_BG,
+  FLOW_FIELD_DASH,
+} from "@/components/FlowFieldBackground";
 import {
   Table,
   TableBody,
@@ -54,6 +58,7 @@ export function formatRelativeDate(date: Date | string): string {
   return formatDate(d);
 }
 
+
 type SerializedRequested = Omit<RequestedAuditListItem, "createdAt"> & {
   createdAt: string;
 };
@@ -73,8 +78,17 @@ export function DashboardAuditView({
   const searchParams = useSearchParams();
   const view: ViewMode = (searchParams.get("view") as ViewMode) || "list";
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const prevTabRef = useRef(tab);
+  const [slideDirection, setSlideDirection] = useState<"left" | "right">("left");
 
   useEffect(() => {
+    if (prevTabRef.current !== tab) {
+      // "given" is left tab, "requested" is right tab
+      // If switching from given→requested, content slides left (new enters from right)
+      // If switching from requested→given, content slides right (new enters from left)
+      setSlideDirection(tab === "requested" ? "left" : "right");
+      prevTabRef.current = tab;
+    }
     setSelectedIds(new Set());
   }, [tab, view]);
 
@@ -107,34 +121,40 @@ export function DashboardAuditView({
 
   const isEmpty = tab === "requested" ? requestedList.length === 0 : givenList.length === 0;
 
+  const slideStyle = {
+    animation: `slide-in-${slideDirection} 0.3s ease-out both`,
+  } as React.CSSProperties;
+
   if (isEmpty) {
     return (
-      <div className="flex flex-col items-center justify-center w-full min-h-[500px] mt-6 dark:bg-card/20 rounded-xl border border-border/50 px-8 pt-16 pb-0 transition-all relative overflow-hidden">
+      <>
+        <style>{`
+        @keyframes slide-in-left {
+          from { opacity: 0; transform: translateX(40px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes slide-in-right {
+          from { opacity: 0; transform: translateX(-40px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
+        <div key={tab} style={slideStyle}>
+          <div className="flex flex-col items-center justify-center w-full min-h-[600px] mt-6 rounded-3xl px-8 pt-16 pb-0 transition-all relative overflow-hidden" style={{ backgroundColor: "#F8F9FF" }}>
 
-        {/* Halftone / Dithered Background Effect (Paper Shaders) */}
-        <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-xl opacity-60">
-          <HalftoneDots
-            width={1280}
-            height={720}
-            image="/architecture.webp"
-            colorBack="#fafcff"
-            colorFront="#cfd0d3"
-            originalColors={false}
-            type="gooey"
-            grid="hex"
-            inverted={false}
-            size={0.15}
-            radius={1.25}
-            contrast={0.48}
-            grainMixer={0.2}
-            grainOverlay={0.2}
-            grainSize={0.5}
-            fit="cover"
-          />
-        </div>
+            <FlowFieldBackground 
+            dashColor={"#E3E5FF"} dashThickness={0.6}
+            meshGradient={[
+              "radial-gradient(ellipse 80% 70% at 10% 10%, #3a3cff55 0%, transparent 60%)",
+              "radial-gradient(ellipse 70% 60% at 90% 5%,  #a78bfa66 0%, transparent 55%)",
+              "radial-gradient(ellipse 90% 70% at 55% 95%, #6366f155 0%, transparent 60%)",
+              "radial-gradient(ellipse 65% 55% at 0%  80%,  #818cf855 0%, transparent 50%)",
+              "radial-gradient(ellipse 55% 45% at 95% 60%, #4f46e544 0%, transparent 45%)",
+            ]}
+            noiseOpacity={0.3}
+            />
 
 
-        {/* <h2 className="text-xl md:text-2xl font-semibold tracking-tight text-foreground mb-3 font-display relative z-10">
+            {/* <h2 className="text-xl md:text-2xl font-semibold tracking-tight text-foreground mb-3 font-display relative z-10">
           {tab === "requested" ? "Request feedback" : "Given feedbacks"}
         </h2>
 
@@ -144,108 +164,179 @@ export function DashboardAuditView({
             : "You can view all the feedbacks you have given."}
         </div> */}
 
-        <div className="relative z-10 w-full max-w-4xl mx-auto flex flex-col md:flex-row items-stretch justify-center gap-10 pb-12">
-          {tab === "requested" ? (
-            <>
-              {/* Card 1 */}
-              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
-                <h4 className="text-lg font-medium text-foreground mb-2">Got a site? Let's floop it</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Paste your URL and tell us what kind of feedback you're after.</p>
-                <div className="mt-auto [&_button]:w-full">
-                  <CreateFloopLinkDropdown directAction="request" />
-                </div>
-              </div>
-              {/* Card 2 */}
-              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
-                <h4 className="text-lg font-medium text-foreground mb-2">Actually flooping it</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Send the link. No installs, no logins needed on their end.</p>
-              </div>
-              {/* Card 3 */}
-              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
-                <h4 className="text-lg font-medium text-foreground mb-2">Checkout the feedback</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Feedback pinned to your site. You'll know what they're talking about instantly.</p>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Card 1 */}
-              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
-                <h4 className="text-lg font-medium text-foreground mb-2">Create a floop link</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Create a floop link for the website you want to give feedback to.</p>
-              </div>
-              {/* Card 2 */}
-              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
-                <h4 className="text-lg font-medium text-foreground mb-2">Give feedback</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed mb-6">Click anywhere on the live website to pin comment at that particular location.</p>
-              </div>
-              {/* Card 3 */}
-              <div className="flex-1 bg-white/70 dark:bg-white/60 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
-                <h4 className="text-lg font-medium text-foreground mb-2">floop it</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed mb-6">floop the feedback by sharing the link with the person you pinned feedback for.</p>
-              </div>
-            </>
-          )}
+            <div className="relative z-10 w-full max-w-4xl mx-auto flex flex-col md:flex-row items-stretch justify-center gap-10 pb-12">
+              {tab === "requested" ? (
+                <>
+                  {/* Card 1 */}
+                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                    <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
+                    <h4 className="text-lg font-medium text-foreground mb-2">Got a site? Let's floop it</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Paste your URL and tell us what kind of feedback you're after.</p>
+                    <div className="mt-auto [&_button]:w-full">
+                      <CreateFloopLinkDropdown directAction="request" />
+                    </div>
+                  </div>
+                  {/* Card 2 */}
+                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                    <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
+                    <h4 className="text-lg font-medium text-foreground mb-2">Actually flooping it</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Send the link. No installs, no logins needed on their end.</p>
+                  </div>
+                  {/* Card 3 */}
+                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                    <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
+                    <h4 className="text-lg font-medium text-foreground mb-2">Checkout the feedback</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Feedback pinned to your site. You'll know what they're talking about instantly.</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Card 1 */}
+                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                    <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
+                    <h4 className="text-lg font-medium text-foreground mb-2">Create a floop link</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Create a floop link for the website you want to give feedback to.</p>
+                    <div className="mt-auto [&_button]:w-full">
+                      <CreateFloopLinkDropdown directAction="give" />
+                    </div>
+                  </div>
+                  {/* Card 2 */}
+                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                    <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
+                    <h4 className="text-lg font-medium text-foreground mb-2">Give feedback</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Click anywhere on the live website to pin comment at that particular location.</p>
+                  </div>
+                  {/* Card 3 */}
+                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
+                    <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
+                    <h4 className="text-lg font-medium text-foreground mb-2">floop it</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">floop the feedback by sharing the link with the person you pinned feedback for.</p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   if (view === "thumbnail") {
     return (
+      <div key={tab} style={slideStyle}>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {tab === "requested"
+              ? requestedList.map((audit: SerializedRequested) => {
+                const total = audit.feedbackCount;
+                const delta = audit.newCommentsCount;
+                const hasNew = delta > 0;
+                const commentsLabel = hasNew ? `${total} (+${delta})` : `${total}`;
+                return (
+                  <AuditThumbnailCard
+                    key={audit.id}
+                    id={audit.id}
+                    screenshotUrl={audit.screenshotUrl}
+                    goal={audit.goal}
+                    url={audit.url}
+                    dateFormatted={formatDate(audit.createdAt)}
+                    reviewerName={audit.reviewerName}
+                    commentsLabel={commentsLabel}
+                    hasNewComments={hasNew}
+                    canEdit
+                    selected={selectedIds.has(audit.id)}
+                    onToggleSelect={toggleSelect}
+                  />
+                );
+              })
+              : givenList.map((audit: SerializedShared) => {
+                const isOwner = audit.isOwner !== false;
+                const total = audit.feedbackCount ?? 0;
+                const nc = audit.newCommentsCount ?? 0;
+                const hasNew = nc > 0;
+                const commentsLabel = hasNew ? `${total} (+${nc})` : `${total}`;
+                return (
+                  <AuditThumbnailCard
+                    key={audit.id}
+                    id={audit.id}
+                    href={`/audit/${audit.id}?floopTip=1`}
+                    screenshotUrl={audit.screenshotUrl}
+                    goal={audit.goal}
+                    url={audit.url}
+                    dateFormatted={formatDate(audit.createdAt)}
+                    reviewerName={audit.reviewerName}
+                    commentsLabel={commentsLabel}
+                    hasNewComments={hasNew}
+                    canEdit={isOwner}
+                    selected={selectedIds.has(audit.id)}
+                    onToggleSelect={isOwner ? toggleSelect : undefined}
+                  />
+                );
+              })}
+          </div>
+          {selectedIds.size > 0 && (
+            <DashboardSelectionBar
+              selectedCount={selectedIds.size}
+              onArchive={batchArchive}
+              onDelete={batchDelete}
+              onClearSelection={clearSelection}
+            />
+          )}
+        </>
+      </div>
+    );
+  }
+
+  return (
+    <div key={tab} style={slideStyle}>
       <>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {tab === "requested"
-            ? requestedList.map((audit: SerializedRequested) => {
-              const total = audit.feedbackCount;
-              const delta = audit.newCommentsCount;
-              const hasNew = delta > 0;
-              const commentsLabel = hasNew ? `${total} (+${delta})` : `${total}`;
-              return (
-                <AuditThumbnailCard
-                  key={audit.id}
-                  id={audit.id}
-                  screenshotUrl={audit.screenshotUrl}
-                  goal={audit.goal}
-                  url={audit.url}
-                  dateFormatted={formatDate(audit.createdAt)}
-                  reviewerName={audit.reviewerName}
-                  commentsLabel={commentsLabel}
-                  hasNewComments={hasNew}
-                  canEdit
-                  selected={selectedIds.has(audit.id)}
-                  onToggleSelect={toggleSelect}
-                />
-              );
-            })
-            : givenList.map((audit: SerializedShared) => {
-              const isOwner = audit.isOwner !== false;
-              const total = audit.feedbackCount ?? 0;
-              const nc = audit.newCommentsCount ?? 0;
-              const hasNew = nc > 0;
-              const commentsLabel = hasNew ? `${total} (+${nc})` : `${total}`;
-              return (
-                <AuditThumbnailCard
-                  key={audit.id}
-                  id={audit.id}
-                  screenshotUrl={audit.screenshotUrl}
-                  goal={audit.goal}
-                  url={audit.url}
-                  dateFormatted={formatDate(audit.createdAt)}
-                  reviewerName={audit.reviewerName}
-                  commentsLabel={commentsLabel}
-                  hasNewComments={hasNew}
-                  canEdit={isOwner}
-                  selected={selectedIds.has(audit.id)}
-                  onToggleSelect={isOwner ? toggleSelect : undefined}
-                />
-              );
-            })}
+        <div className="-mx-4 sm:mx-0 px-4 sm:px-0">
+          <Table className="w-full table-fixed">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[11%] px-3 py-2.5">
+                  {tab === "requested" ? "Floop from" : "Flooping to"}
+                </TableHead>
+                <TableHead className="w-[30%] px-3 py-2.5">Link</TableHead>
+                <TableHead className="w-[26%] px-3 py-2.5">Goal</TableHead>
+                <TableHead className="w-[12%] text-center px-3 py-2.5">Comments</TableHead>
+                <TableHead className="w-[12%] px-3 py-2.5">Date</TableHead>
+                <TableHead className="w-[9%] px-2 py-2.5" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tab === "requested"
+                ? requestedList.map((audit: SerializedRequested) => (
+                  <RequestedAuditRow
+                    key={audit.id}
+                    audit={audit as unknown as RequestedAuditListItem}
+                    dateFormatted={formatRelativeDate(audit.createdAt)}
+                    selected={selectedIds.has(audit.id)}
+                    onToggleSelect={toggleSelect}
+                  />
+                ))
+                : givenList.map((audit: SerializedShared) => {
+                  const isOwner = audit.isOwner !== false;
+                  return (
+                    <AuditTableRow
+                      key={audit.id}
+                      id={audit.id}
+                      href={`/audit/${audit.id}?floopTip=1`}
+                      screenshotUrl={audit.screenshotUrl}
+                      dateFormatted={formatRelativeDate(audit.createdAt)}
+                      websiteUrl={audit.url}
+                      goal={audit.goal}
+                      name={audit.reviewerName}
+                      canEdit={isOwner}
+                      feedbackCount={audit.feedbackCount}
+                      newCommentsCount={audit.newCommentsCount}
+                      selected={selectedIds.has(audit.id)}
+                      onToggleSelect={isOwner ? toggleSelect : undefined}
+                    />
+                  );
+                })}
+            </TableBody>
+          </Table>
         </div>
         {selectedIds.size > 0 && (
           <DashboardSelectionBar
@@ -256,67 +347,6 @@ export function DashboardAuditView({
           />
         )}
       </>
-    );
-  }
-
-  return (
-    <>
-      <div className="-mx-4 sm:mx-0 px-4 sm:px-0">
-        <Table className="w-full table-fixed">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[11%] px-3 py-2.5">
-                {tab === "requested" ? "Floop from" : "Flooping to"}
-              </TableHead>
-              <TableHead className="w-[30%] px-3 py-2.5">Link</TableHead>
-              <TableHead className="w-[26%] px-3 py-2.5">Goal</TableHead>
-              <TableHead className="w-[12%] text-center px-3 py-2.5">Comments</TableHead>
-              <TableHead className="w-[12%] px-3 py-2.5">Date</TableHead>
-              <TableHead className="w-[9%] px-2 py-2.5" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {tab === "requested"
-              ? requestedList.map((audit: SerializedRequested) => (
-                <RequestedAuditRow
-                  key={audit.id}
-                  audit={audit as unknown as RequestedAuditListItem}
-                  dateFormatted={formatRelativeDate(audit.createdAt)}
-                  selected={selectedIds.has(audit.id)}
-                  onToggleSelect={toggleSelect}
-                />
-              ))
-              : givenList.map((audit: SerializedShared) => {
-                const isOwner = audit.isOwner !== false;
-                return (
-                  <AuditTableRow
-                    key={audit.id}
-                    id={audit.id}
-                    href={`/audit/${audit.id}`}
-                    screenshotUrl={audit.screenshotUrl}
-                    dateFormatted={formatRelativeDate(audit.createdAt)}
-                    websiteUrl={audit.url}
-                    goal={audit.goal}
-                    name={audit.reviewerName}
-                    canEdit={isOwner}
-                    feedbackCount={audit.feedbackCount}
-                    newCommentsCount={audit.newCommentsCount}
-                    selected={selectedIds.has(audit.id)}
-                    onToggleSelect={isOwner ? toggleSelect : undefined}
-                  />
-                );
-              })}
-          </TableBody>
-        </Table>
-      </div>
-      {selectedIds.size > 0 && (
-        <DashboardSelectionBar
-          selectedCount={selectedIds.size}
-          onArchive={batchArchive}
-          onDelete={batchDelete}
-          onClearSelection={clearSelection}
-        />
-      )}
-    </>
+    </div>
   );
 }

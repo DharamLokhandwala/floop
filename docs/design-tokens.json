@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "description": "Snapshot-oriented token contract for models. For live values use /design-system.",
+    "liveSource": "/design-system",
+    "sourceFiles": [
+      "app/globals.css",
+      "components/ui/button.tsx",
+      "components/ui/input.tsx",
+      "components/ui/textarea.tsx",
+      "components/ui/dialog.tsx",
+      "components/ui/tooltip.tsx",
+      "components/AuditViewer.tsx"
+    ]
+  },
+  "rules": {
+    "reuseSemanticTokensFirst": true,
+    "reuseUiPrimitivesFirst": true,
+    "avoidOneOffVisualValues": true,
+    "preserveFocusAndAccessibilityStates": true
+  },
+  "tokenGroups": [
+    ":root",
+    ".dark",
+    "@theme inline",
+    "pinCategoryHex"
+  ],
+  "notes": [
+    "Do not add new colors/radii/shadows without explicit request.",
+    "Prefer bg/background, text/foreground, border/ring token pairs.",
+    "Use Button/Input/Textarea/Dialog/Tooltip primitives."
+  ]
+}

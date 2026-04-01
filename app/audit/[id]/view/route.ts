@@ -1,4 +1,5 @@
 import { getAuditById } from "@/lib/audits";
+import { getCurrentUser } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_PROTOCOLS = ["https:", "http:"];
@@ -135,8 +136,16 @@ export async function GET(
     html = html.replace(/<html\b/i, "<html><head>" + historyShim + baseTag + "</head>");
   }
 
+  const sessionUser = await getCurrentUser();
+  const createdById = audit.createdById ?? null;
+  const viewerAuthenticated = !!sessionUser;
+  const viewerIsOwner = !!(sessionUser && createdById && sessionUser.id === createdById);
+
   // 5. Inject viewer script
-  const viewerScript = getViewerScript(id, targetUrl.href, pinsForPage);
+  const viewerScript = getViewerScript(id, targetUrl.href, pinsForPage, {
+    viewerAuthenticated,
+    viewerIsOwner,
+  });
   if (html.includes("</body>")) {
     html = html.replace("</body>", `${viewerScript}</body>`);
   } else {
@@ -405,6 +414,7 @@ function getHistoryShimScript(
 }
 
 interface PinForScript {
+  id?: string;
   x: number;
   y: number;
   category?: string;
@@ -416,13 +426,27 @@ interface PinForScript {
   scrollY?: number;
   docX?: number;
   docY?: number;
+  replies?: Array<{
+    id: string;
+    userId: string;
+    body: string;
+    createdAt: string;
+    authorName?: string | null;
+  }>;
 }
 
-function getViewerScript(auditId: string, pageUrl: string, pins: PinForScript[]): string {
+function getViewerScript(
+  auditId: string,
+  pageUrl: string,
+  pins: PinForScript[],
+  viewerContext: { viewerAuthenticated: boolean; viewerIsOwner: boolean }
+): string {
   const pinsJson = JSON.stringify(pins);
+  const vAuth = JSON.stringify(viewerContext.viewerAuthenticated);
+  const vOwner = JSON.stringify(viewerContext.viewerIsOwner);
   const script = `
 <script>
-window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson} };
+window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson}, viewerAuthenticated: ${vAuth}, viewerIsOwner: ${vOwner} };
 (function() {
   var commentMode = false;
   var hotspotElements = [];
@@ -461,7 +485,35 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     lastHoveredEl = null;
   }
 
+  var isMac = /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
+  function isModifierHeld(e) { return isMac ? e.metaKey : e.ctrlKey; }
+  function setCommentModeFromKey(active) {
+    if (commentMode === active) return;
+    commentMode = active;
+    document.body.style.cursor = active ? 'crosshair' : '';
+    if (document.documentElement) document.documentElement.style.cursor = active ? 'crosshair' : '';
+    if (active) createHoverOverlay();
+    else hideHoverOverlay();
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'CTRL_KEY_STATE', held: active }, '*');
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if ((isMac && e.key === 'Meta') || (!isMac && e.key === 'Control')) {
+      setCommentModeFromKey(true);
+    }
+  });
+  document.addEventListener('keyup', function(e) {
+    if ((isMac && e.key === 'Meta') || (!isMac && e.key === 'Control')) {
+      setCommentModeFromKey(false);
+    }
+  });
+  window.addEventListener('blur', function() { setCommentModeFromKey(false); });
+
   document.addEventListener('mousemove', function(e) {
+    var modHeld = isModifierHeld(e);
+    if (modHeld !== commentMode) setCommentModeFromKey(modHeld);
     if (!commentMode) { hideHoverOverlay(); return; }
     createHoverOverlay();
     var wasDisplay = hoverOverlay ? hoverOverlay.style.display : '';
@@ -531,6 +583,22 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     return null;
   }
 
+  var _highlightedEl = null;
+  var _highlightTimer = null;
+  function highlightPinTarget(pin) {
+    clearPinHighlight();
+    var target = resolveTargetElement(pin);
+    if (target) {
+      target.style.outline = '3px solid #0ea5e9';
+      target.style.outlineOffset = '2px';
+      _highlightedEl = target;
+    }
+  }
+  function clearPinHighlight() {
+    if (_highlightedEl) { _highlightedEl.style.outline = ''; _highlightedEl.style.outlineOffset = ''; _highlightedEl = null; }
+    if (_highlightTimer) { clearTimeout(_highlightTimer); _highlightTimer = null; }
+  }
+
   /* â”€â”€ Compute viewport-relative position for a pin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function computePinViewportPosition(pin, scrollContainer) {
     // Try to anchor to DOM element first (most robust)
@@ -575,33 +643,470 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     return { vx: 0, vy: 0, visible: false };
   }
 
-  /* â”€â”€ Tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* Pin thread tooltip (reply / delete) */
   var tooltipEl = null;
   var activeTooltipIndex = -1;
+  var hideTooltipTimer = null;
+  var activeReplyMicCleanup = null;
+  /* Set to true after a reply succeeds; prevents the scheduled-hide timer from
+     closing the tooltip during the async window between reply success and the
+     UPDATE_PINS message that triggers renderHotspots. Reset in renderHotspots. */
+  var replyJustPosted = false;
+  var replyJustPostedSafetyTimer = null;
+
+  function cancelHideTooltip() {
+    if (hideTooltipTimer) { clearTimeout(hideTooltipTimer); hideTooltipTimer = null; }
+  }
+  function scheduleHideTooltip() {
+    if (replyJustPosted) return;
+    cancelHideTooltip();
+    hideTooltipTimer = setTimeout(function() { hideTooltip(); }, 280);
+  }
+
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function authorInitials(name) {
+    var n = String(name == null ? '' : name).trim();
+    if (!n.length) return '?';
+    return n.charAt(0).toUpperCase();
+  }
+  function replyAvatarBg(name) {
+    var h = 0, s = String(name || 'user');
+    for (var j = 0; j < s.length; j++) h = (h + s.charCodeAt(j) * 17) % 360;
+    return 'hsl(' + h + ', 46%, 44%)';
+  }
+
+  function timeAgo(dateInput) {
+    if (!dateInput) return 'just now';
+    var d = new Date(dateInput);
+    if (isNaN(d.getTime())) return 'just now';
+    var seconds = Math.round((new Date().getTime() - d.getTime()) / 1000);
+    if (seconds < 60) return 'just now';
+    var minutes = Math.round(seconds / 60);
+    if (minutes < 60) return minutes + 'm ago';
+    var hours = Math.round(minutes / 60);
+    if (hours < 24) return hours + 'h ago';
+    var days = Math.round(hours / 24);
+    if (days < 30) return days + 'd ago';
+    var months = Math.round(days / 30);
+    if (months < 12) return months + 'mo ago';
+    var years = Math.round(days / 365);
+    return years + 'y ago';
+  }
+
+  function injectFigmaThreadCss() {
+    if (document.getElementById('audit-figma-thread-css')) return;
+    var st = document.createElement('style');
+    st.id = 'audit-figma-thread-css';
+    st.textContent = '#audit-viewer-tooltip.audit-figma-root{max-width:320px;min-width:300px;max-height:72vh;overflow:hidden;padding:0;margin:0;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1e1e1e;background:#fff;border-radius:16px;box-shadow:0 12px 32px rgba(0,0,0,0.12),0 2px 8px rgba(0,0,0,0.06);-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;padding-top:12px;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-messages{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-header{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;flex-shrink:0;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-header-title{font-size:15px;font-weight:700;color:#111827;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-header-btn{background:none;border:none;cursor:pointer;padding:4px;border-radius:6px;color:#6b7280;display:flex;align-items:center;justify-content:center;transition:background 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-header-btn:hover{background:#f3f4f6;color:#111827;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-msg{padding:8px 16px 12px;display:flex;flex-direction:column;gap:6px;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-name{font-size:11px;font-weight:500;color:#6b7280;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-bubble{background:rgba(243,244,246,0.6);border:1px solid rgba(229,231,235,0.8);border-radius:12px;padding:12px;font-size:13px;line-height:1.6;color:#111827;word-break:break-word;white-space:pre-wrap;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-composer{padding:4px 16px 16px;flex-shrink:0;border-top:1px solid rgba(229,231,235,0.6);}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-initial-reply{display:flex;align-items:center;gap:6px;color:#3A3CFF;font-size:13px;font-weight:500;background:none;border:none;cursor:pointer;padding:0;margin-top:4px;transition:opacity 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-initial-reply:hover{opacity:0.8;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-composer-state2{display:none;flex-direction:column;gap:6px;margin-top:4px;}' +
+      '#audit-viewer-tooltip.audit-figma-root.is-replying .af-initial-reply{display:none;}' +
+      '#audit-viewer-tooltip.audit-figma-root.is-replying .af-composer-state2{display:flex;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-composer-row{display:flex;align-items:center;gap:8px;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-ta{flex:1;box-sizing:border-box;border:1px solid rgba(229,231,235,0.8);border-radius:8px;padding:0 12px;font-size:13px;font-family:inherit;background:rgba(243,244,246,0.6);height:36px;line-height:36px;transition:border-color 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-ta:focus{outline:none;border-color:rgba(58,60,255,0.5);}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-ta::placeholder{color:rgba(107,114,128,0.5);}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-btn{flex-shrink:0;width:36px;height:36px;border-radius:50%;border:none;background:#3A3CFF;color:#fff;display:flex;align-items:center;justify-content:center;transition:background 0.15s;cursor:pointer;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-btn:disabled{background:rgba(58,60,255,0.5);cursor:default;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-btn svg{width:16px;height:16px;margin-left:-2px;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-mic-btn{width:36px;height:36px;min-width:36px;border-radius:50%;border:none;background:#f3f4f6;color:#6b7280;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 0.15s,color 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-mic-btn:hover{background:#e5e7eb;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-mic-btn.af-mic-rec{background:#ef4444;color:#fff;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-mic-btn:disabled{opacity:0.5;cursor:default;}' +
+      '@keyframes af-mic-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-mic-spin{animation:af-mic-spin 0.8s linear infinite;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-reply-field{flex:1;min-width:0;display:flex;align-items:stretch;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-reply-field .af-ta{flex:1;min-width:0;width:100%;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-reply-wave{display:none;flex:1;min-width:0;align-items:center;gap:3px;height:36px;padding:0 12px;box-sizing:border-box;border:1px solid rgba(229,231,235,0.8);border-radius:8px;background:rgba(243,244,246,0.6);}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-reply-wave-bar{display:inline-block;width:3px;height:4px;border-radius:2px;background:#788BE6;opacity:0.25;flex-shrink:0;align-self:center;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-header-actions{display:flex;align-items:center;gap:2px;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-trash-btn{color:#be123c;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-trash-btn:hover{background:rgba(190,18,60,0.08);color:#9f1239;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-err{font-size:11px;color:#dc2626;margin-top:6px;display:block;}';
+    document.head.appendChild(st);
+  }
 
   function ensureTooltip() {
     if (tooltipEl) return;
+    injectFigmaThreadCss();
     tooltipEl = document.createElement('div');
     tooltipEl.id = 'audit-viewer-tooltip';
-    tooltipEl.style.cssText = 'position:fixed;display:none;max-width:280px;padding:10px 14px;background:#1f2937;color:#f9fafb;font-size:13px;line-height:1.45;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,0.25);z-index:2147483648;pointer-events:none;';
+    tooltipEl.className = 'audit-figma-root';
+    tooltipEl.style.cssText = 'position:fixed;left:0;top:0;display:none;z-index:2147483648;pointer-events:auto;';
+    
+    tooltipEl.addEventListener('mouseenter', cancelHideTooltip);
+    tooltipEl.addEventListener('mouseleave', function() { scheduleHideTooltip(); });
+
+    // Allow clicking outside the tooltip to close it
+    document.addEventListener('mousedown', function(e) {
+      if (tooltipEl && tooltipEl.style.display !== 'none') {
+        if (!tooltipEl.contains(e.target) && !e.target.closest('.audit-viewer-hotspot')) {
+          cancelHideTooltip();
+          tooltipEl.style.display = 'none';
+          activeTooltipIndex = -1;
+          clearPinHighlight();
+        }
+      }
+    });
+
     document.documentElement.appendChild(tooltipEl);
   }
 
   function showTooltip(pin, i, vx, vy) {
     ensureTooltip();
+    cancelHideTooltip();
     activeTooltipIndex = i;
-    var cat = pin.category ? '<div style="font-size:11px;opacity:0.9;margin-bottom:4px;text-transform:uppercase;">' + pin.category + '</div>' : '';
-    var text = (pin.feedback || 'Comment ' + (i + 1)).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    tooltipEl.innerHTML = cat + '<div>' + text + '</div>';
+    var replyMicAborted = false;
+    var av = window.__AUDIT_VIEWER__ || {};
+    var aid = av.auditId;
+    var viewerAuthenticated = !!av.viewerAuthenticated;
+    var viewerIsOwner = !!av.viewerIsOwner;
+    var cat = escHtml(pin.category || 'Feedback');
+    var text = escHtml(pin.feedback || ('Comment ' + (i + 1)));
+    var pinId = pin.id || '';
+    var replies = pin.replies || [];
+    /* Default: comment + Reply button only; composer shows after user clicks Reply (same for threads). */
+    tooltipEl.className = 'audit-figma-root';
+
+    var trashBtnHtml = '';
+    if (viewerIsOwner && pinId) {
+      trashBtnHtml = '<button type="button" class="af-header-btn af-trash-btn" id="audit-pin-delete-btn" aria-label="Delete comment" title="Delete comment"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></button>';
+    }
+    var headerHtml = '<div class="af-header"><span class="af-header-title">' + cat + '</span><div class="af-header-actions">' + trashBtnHtml +
+      '<button type="button" class="af-header-btn" aria-label="Close" onclick="document.getElementById(\\'audit-viewer-tooltip\\').style.display=\\'none\\'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>' +
+      '</div>';
+    var deleteErrHtml = (viewerIsOwner && pinId) ? '<span id="audit-pin-delete-err" class="af-err" style="padding:0 16px;"></span>' : '';
+
+    var dateStr = pin.createdAt ? '<span style="color:rgba(107,114,128,0.4);line-height:1;">·</span><span style="font-size:10px;color:rgba(107,114,128,0.7);">' + escHtml(timeAgo(pin.createdAt)) + '</span>' : '';
+    var rootRow = '<div class="af-msg"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#000;background:#FACC15;text-transform:uppercase;">' + escHtml(authorInitials('Dharam')) + '</div><span class="af-name" style="display:flex;align-items:center;gap:6px;"><span>Dharam Lokhandwala</span>' + dateStr + '</span></div><div class="af-bubble">' + text + '</div></div>';
+    
+    var repliesHtml = '';
+    for (var ri = 0; ri < replies.length; ri++) {
+      var r = replies[ri];
+      var ra = escHtml(r.authorName || 'User');
+      var rb = escHtml(r.body || '');
+      var ini = escHtml(authorInitials(r.authorName));
+      var bg = replyAvatarBg(r.authorName);
+      var rDateStr = r.createdAt ? '<span style="color:rgba(107,114,128,0.4);line-height:1;">·</span><span style="font-size:10px;color:rgba(107,114,128,0.7);">' + escHtml(timeAgo(r.createdAt)) + '</span>' : '';
+      repliesHtml += '<div class="af-msg" style="padding-top:4px;"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#fff;background:' + bg + ';text-transform:uppercase;">' + ini + '</div><span class="af-name" style="display:flex;align-items:center;gap:6px;"><span>' + ra + '</span>' + rDateStr + '</span></div><div class="af-bubble">' + rb + '</div></div>';
+    }
+    
+    var replyBox = '';
+    if (viewerAuthenticated) {
+      var afWaveBars = '';
+      for (var wbi = 0; wbi < 12; wbi++) {
+        afWaveBars += '<span class="af-reply-wave-bar"></span>';
+      }
+      replyBox = '<div class="af-composer">' +
+        '<button class="af-initial-reply" onclick="document.getElementById(\\'audit-viewer-tooltip\\').classList.add(\\'is-replying\\')">Reply <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg></button>' +
+        '<div class="af-composer-state2"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#fff;background:#3A3CFF;text-transform:uppercase;">' + escHtml(authorInitials('Dharam')) + '</div><span class="af-name">Dharam Lokhandwala</span></div><div class="af-composer-row"><div class="af-reply-field"><input type="text" id="audit-pin-reply-ta" class="af-ta" placeholder="Write a reply…" autocomplete="off"/><div id="audit-pin-reply-wave" class="af-reply-wave" style="display:none" aria-hidden="true">' + afWaveBars + '</div></div><button type="button" class="af-mic-btn" id="audit-pin-reply-mic" title="Record voice reply" aria-label="Record voice reply"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="23"/></svg></button><button type="button" class="af-btn" id="audit-pin-reply-btn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>' +
+        '<span id="audit-pin-reply-err" class="af-err"></span></div>';
+    }
+    tooltipEl.innerHTML = headerHtml + deleteErrHtml + '<div class="af-messages">' + rootRow + repliesHtml + '</div>' + replyBox;
+    // Scroll messages to bottom so latest reply is always visible
+    var msgsEl = tooltipEl.querySelector('.af-messages');
+    if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+
+    activeReplyMicCleanup = null;
+    var replyBtn = document.getElementById('audit-pin-reply-btn');
+    var ta = document.getElementById('audit-pin-reply-ta');
+    var micBtn = document.getElementById('audit-pin-reply-mic');
+    var replyRecorder = null, replyChunks = [], replyStream = null, replyMime = '';
+    var replyMicMode = 'idle';
+    var replyAudioCtx = null;
+    var replyAnalyser = null;
+    var replyWaveAnimId = null;
+
+    function stopReplyWaveform() {
+      if (replyWaveAnimId) {
+        cancelAnimationFrame(replyWaveAnimId);
+        replyWaveAnimId = null;
+      }
+      if (replyAudioCtx) {
+        try { replyAudioCtx.close(); } catch (eW0) {}
+        replyAudioCtx = null;
+      }
+      replyAnalyser = null;
+      var waveRoot = document.getElementById('audit-pin-reply-wave');
+      if (waveRoot) {
+        var bars = waveRoot.querySelectorAll('.af-reply-wave-bar');
+        for (var bi = 0; bi < bars.length; bi++) {
+          bars[bi].style.height = '4px';
+          bars[bi].style.opacity = '0.25';
+        }
+      }
+    }
+
+    function startReplyWaveform(stream) {
+      stopReplyWaveform();
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        replyAudioCtx = new AC();
+        replyAnalyser = replyAudioCtx.createAnalyser();
+        replyAnalyser.fftSize = 64;
+        replyAnalyser.smoothingTimeConstant = 0.75;
+        replyAudioCtx.createMediaStreamSource(stream).connect(replyAnalyser);
+        replyAudioCtx.resume().catch(function() {});
+        var dataArray = new Uint8Array(replyAnalyser.frequencyBinCount);
+        var NUM_BARS = 12;
+        var waveRoot = document.getElementById('audit-pin-reply-wave');
+        function draw() {
+          if (!replyAnalyser) return;
+          replyAnalyser.getByteFrequencyData(dataArray);
+          var bars = waveRoot ? waveRoot.querySelectorAll('.af-reply-wave-bar') : [];
+          for (var bj = 0; bj < bars.length; bj++) {
+            var bar = bars[bj];
+            var bin = Math.floor((bj / NUM_BARS) * dataArray.length * 0.6);
+            var v = dataArray[bin] / 255;
+            bar.style.height = (4 + v * 18) + 'px';
+            bar.style.opacity = v < 0.05 ? '0.2' : String(0.4 + v * 0.6);
+          }
+          replyWaveAnimId = requestAnimationFrame(draw);
+        }
+        draw();
+      } catch (eW1) {}
+    }
+
+    function syncReplySendState() {
+      if (!replyBtn || !ta) return;
+      if (replyMicMode === 'idle') replyBtn.disabled = !ta.value.trim();
+    }
+
+    function setReplyMicMode(m) {
+      replyMicMode = m;
+      if (!micBtn || !ta || !replyBtn) return;
+      var waveEl = document.getElementById('audit-pin-reply-wave');
+      if (waveEl) {
+        if (m === 'recording') {
+          ta.style.display = 'none';
+          waveEl.style.display = 'flex';
+          waveEl.setAttribute('aria-hidden', 'false');
+        } else {
+          ta.style.display = '';
+          waveEl.style.display = 'none';
+          waveEl.setAttribute('aria-hidden', 'true');
+        }
+      }
+      micBtn.disabled = (m === 'transcribing');
+      ta.disabled = (m === 'transcribing' || m === 'recording');
+      if (m === 'transcribing') ta.placeholder = 'Transcribing…';
+      else if (m === 'recording') ta.placeholder = 'Recording…';
+      else ta.placeholder = 'Write a reply…';
+      micBtn.className = 'af-mic-btn' + (m === 'recording' ? ' af-mic-rec' : '');
+      if (m === 'transcribing') {
+        micBtn.innerHTML = '<svg class="af-mic-spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+      } else if (m === 'recording') {
+        micBtn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+      } else {
+        micBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="23"/></svg>';
+      }
+      if (m === 'idle') syncReplySendState();
+      else replyBtn.disabled = true;
+    }
+
+    activeReplyMicCleanup = function() {
+      replyMicAborted = true;
+      stopReplyWaveform();
+      try {
+        if (replyRecorder && replyRecorder.state !== 'inactive') replyRecorder.stop();
+      } catch (e0) {}
+      try {
+        if (replyStream) replyStream.getTracks().forEach(function(t) { t.stop(); });
+      } catch (e1) {}
+      replyRecorder = null;
+      replyStream = null;
+      replyChunks = [];
+      replyMicMode = 'idle';
+      replyMicAborted = false;
+    };
+
+    if (ta && replyBtn && micBtn) {
+      ta.oninput = function() { syncReplySendState(); };
+      ta.onkeydown = function(e) {
+        if (e.key === 'Enter' && replyMicMode === 'idle') { e.preventDefault(); replyBtn.click(); }
+      };
+      micBtn.onclick = function() {
+        var errEl = document.getElementById('audit-pin-reply-err');
+        if (errEl) errEl.textContent = '';
+        if (replyMicMode === 'transcribing') return;
+        if (replyMicMode === 'recording') {
+          if (replyRecorder && replyRecorder.state !== 'inactive') replyRecorder.stop();
+          return;
+        }
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function(s) {
+          replyStream = s;
+          replyChunks = [];
+          var mimeTypes = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg','audio/mp4'];
+          replyMime = '';
+          for (var ki = 0; ki < mimeTypes.length; ki++) {
+            try {
+              if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mimeTypes[ki])) {
+                replyMime = mimeTypes[ki];
+                break;
+              }
+            } catch (e2) {}
+          }
+          replyRecorder = new MediaRecorder(s, replyMime ? { mimeType: replyMime } : undefined);
+          replyRecorder.ondataavailable = function(ev) { if (ev.data && ev.data.size > 0) replyChunks.push(ev.data); };
+          replyRecorder.onstop = function() {
+            stopReplyWaveform();
+            var errEl2 = document.getElementById('audit-pin-reply-err');
+            try { if (replyStream) replyStream.getTracks().forEach(function(t) { t.stop(); }); } catch (e3) {}
+            replyStream = null;
+            if (replyMicAborted) {
+              replyChunks = [];
+              setReplyMicMode('idle');
+              syncReplySendState();
+              replyRecorder = null;
+              return;
+            }
+            var blob = new Blob(replyChunks, { type: replyMime || 'audio/webm' });
+            replyChunks = [];
+            if (!blob.size) {
+              setReplyMicMode('idle');
+              syncReplySendState();
+              replyRecorder = null;
+              return;
+            }
+            setReplyMicMode('transcribing');
+            var ext = replyMime.indexOf('ogg') >= 0 ? 'ogg' : replyMime.indexOf('mp4') >= 0 ? 'm4a' : 'webm';
+            var fd = new FormData();
+            fd.append('audio', blob, 'recording.' + ext);
+            fetch('/audit/' + aid + '/transcribe-audio', { method: 'POST', credentials: 'include', body: fd })
+              .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
+              .then(function(x) {
+                setReplyMicMode('idle');
+                if (!x.res.ok) throw new Error(x.data.error || 'Transcription failed');
+                if (x.data.transcript && ta) ta.value = x.data.transcript;
+                if (errEl2 && x.data.error && !x.data.transcript) errEl2.textContent = x.data.error;
+                syncReplySendState();
+              })
+              .catch(function(e4) {
+                setReplyMicMode('idle');
+                if (errEl2) errEl2.textContent = e4.message || 'Transcription failed';
+                syncReplySendState();
+              });
+            replyRecorder = null;
+          };
+          replyRecorder.start(250);
+          setReplyMicMode('recording');
+          startReplyWaveform(s);
+        }).catch(function() {
+          var errEl3 = document.getElementById('audit-pin-reply-err');
+          if (errEl3) errEl3.textContent = 'Could not access microphone';
+        });
+      };
+    } else if (ta && replyBtn) {
+      ta.oninput = function() { replyBtn.disabled = !ta.value.trim(); };
+      ta.onkeydown = function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); replyBtn.click(); }
+      };
+    }
+
+    if (replyBtn) {
+      replyBtn.onclick = function() {
+        var errEl = document.getElementById('audit-pin-reply-err');
+        if (errEl) errEl.textContent = '';
+        var body = (ta && ta.value || '').trim();
+        if (!body) { if (errEl) errEl.textContent = 'Enter a message'; return; }
+        var p = av.pins && av.pins[activeTooltipIndex];
+        var pid = p && p.id;
+        if (!pid) { if (errEl) errEl.textContent = 'Cannot reply to this pin yet'; return; }
+        replyBtn.disabled = true;
+        fetch('/audit/' + aid + '/pin/reply', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinId: pid, body: body }) })
+          .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
+          .then(function(x) {
+            replyBtn.disabled = false;
+            if (!x.res.ok) throw new Error(x.data.error || 'Failed');
+            if (ta) ta.value = '';
+            // Block scheduled-hide between now and the upcoming UPDATE_PINS / renderHotspots
+            replyJustPosted = true;
+            cancelHideTooltip();
+            if (replyJustPostedSafetyTimer) clearTimeout(replyJustPostedSafetyTimer);
+            replyJustPostedSafetyTimer = setTimeout(function() { replyJustPosted = false; replyJustPostedSafetyTimer = null; }, 8000);
+            if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+          })
+          .catch(function(e) {
+            replyBtn.disabled = false;
+            if (errEl) errEl.textContent = e.message || 'Failed';
+          });
+      };
+    }
+    var delBtn = document.getElementById('audit-pin-delete-btn');
+    if (delBtn) {
+      delBtn.onclick = function() {
+        if (!confirm('Delete this comment?')) return;
+        var errEl = document.getElementById('audit-pin-delete-err');
+        if (errEl) errEl.textContent = '';
+        var p = av.pins && av.pins[activeTooltipIndex];
+        var pid = p && p.id;
+        if (!pid) { if (errEl) errEl.textContent = 'Missing pin id'; return; }
+        delBtn.disabled = true;
+        fetch('/audit/' + aid + '/pin?pinId=' + encodeURIComponent(pid), { method: 'DELETE', credentials: 'include' })
+          .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
+          .then(function(x) {
+            delBtn.disabled = false;
+            if (!x.res.ok) throw new Error(x.data.error || 'Failed');
+            if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+            hideTooltip();
+          })
+          .catch(function(e) {
+            delBtn.disabled = false;
+            if (errEl) errEl.textContent = e.message || 'Failed';
+          });
+      };
+    }
+
+    // Smart positioning: open above if enough room, otherwise open below
+    var viewportH = window.innerHeight;
+    var margin = 16; // px from viewport edge
+    var spaceAbove = vy - 12 - margin;
+    var spaceBelow = viewportH - vy - 8 - margin;
+    var minH = 180;
+    var maxAllowed = Math.floor(viewportH * 0.72);
+    var openAbove = spaceAbove >= minH || spaceAbove >= spaceBelow;
+    var availableH = openAbove ? spaceAbove : spaceBelow;
+    var tooltipMaxH = Math.max(minH, Math.min(maxAllowed, availableH));
+
+    tooltipEl.style.maxHeight = tooltipMaxH + 'px';
     tooltipEl.style.display = 'block';
     tooltipEl.style.left = vx + 'px';
-    tooltipEl.style.top = (vy - 10) + 'px';
-    tooltipEl.style.transform = 'translate(-50%, -100%)';
+    if (openAbove) {
+      tooltipEl.style.top = (vy - 12) + 'px';
+      tooltipEl.style.transform = 'translate(-50%, -100%)';
+    } else {
+      tooltipEl.style.top = (vy + 8) + 'px';
+      tooltipEl.style.transform = 'translate(-50%, 0)';
+    }
+    tooltipEl.style.animation = 'audit-tooltip-in 0.15s ease-out';
   }
 
   function hideTooltip() {
+    cancelHideTooltip();
+    if (replyJustPosted) return;
+    var ta = document.getElementById('audit-pin-reply-ta');
+    if (ta && (document.activeElement === ta || (ta.value && ta.value.trim() !== ''))) return;
+    if (typeof activeReplyMicCleanup === 'function') {
+      try { activeReplyMicCleanup(); } catch (e) {}
+      activeReplyMicCleanup = null;
+    }
     if (tooltipEl) tooltipEl.style.display = 'none';
     activeTooltipIndex = -1;
+    clearPinHighlight();
   }
 
   /* â”€â”€ Continuous repositioning of hotspots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -632,14 +1137,28 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     // Update tooltip position if shown
     if (activeTooltipIndex >= 0 && tooltipEl && tooltipEl.style.display !== 'none' && pins[activeTooltipIndex]) {
       var tpos = computePinViewportPosition(pins[activeTooltipIndex], cachedScrollContainer);
+      var tvh = window.innerHeight, tMargin = 16, tMinH = 180;
+      var tSpaceAbove = tpos.vy - 12 - tMargin;
+      var tSpaceBelow = tvh - tpos.vy - 8 - tMargin;
+      var tOpenAbove = tSpaceAbove >= tMinH || tSpaceAbove >= tSpaceBelow;
+      var tAvail = tOpenAbove ? tSpaceAbove : tSpaceBelow;
+      var tMaxH = Math.max(tMinH, Math.min(Math.floor(tvh * 0.72), tAvail));
+      tooltipEl.style.maxHeight = tMaxH + 'px';
       tooltipEl.style.left = tpos.vx + 'px';
-      tooltipEl.style.top = (tpos.vy - 10) + 'px';
+      if (tOpenAbove) {
+        tooltipEl.style.top = (tpos.vy - 12) + 'px';
+        tooltipEl.style.transform = 'translate(-50%, -100%)';
+      } else {
+        tooltipEl.style.top = (tpos.vy + 8) + 'px';
+        tooltipEl.style.transform = 'translate(-50%, 0)';
+      }
     }
     rafId = requestAnimationFrame(updateAllPositions);
   }
 
   /* â”€â”€ Render hotspots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function cleanupHotspots() {
+    cancelHideTooltip();
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     hotspotElements.forEach(function(el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
     hotspotElements = [];
@@ -649,6 +1168,16 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   }
 
   function renderHotspots() {
+    // UPDATE_PINS arrived — safe to allow hide again
+    replyJustPosted = false;
+    if (replyJustPostedSafetyTimer) { clearTimeout(replyJustPostedSafetyTimer); replyJustPostedSafetyTimer = null; }
+
+    var pinsBefore = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pins;
+    var reopenThread =
+      !!(tooltipEl && tooltipEl.style.display !== 'none' && activeTooltipIndex >= 0 && pinsBefore && pinsBefore[activeTooltipIndex]);
+    var reopenPinId = reopenThread && pinsBefore[activeTooltipIndex].id ? pinsBefore[activeTooltipIndex].id : null;
+    var reopenPinIndex = reopenThread ? activeTooltipIndex : -1;
+
     // ALWAYS clean up old hotspots first (even if new pins are empty)
     cleanupHotspots();
     var pins = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pins;
@@ -660,7 +1189,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     if (!styleEl) {
       styleEl = document.createElement('style');
       styleEl.id = 'audit-viewer-hotspot-styles';
-      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{box-shadow:0 2px 8px rgba(0,0,0,0.25),0 0 0 2px #fff}50%{box-shadow:0 4px 20px rgba(0,0,0,0.35),0 0 0 4px rgba(255,255,255,0.8)}}.audit-viewer-hotspot{display:block !important;width:24px !important;height:24px !important;min-width:24px !important;min-height:24px !important;animation:audit-hotspot-pulse 2.2s ease-in-out infinite !important;opacity:1 !important;visibility:visible !important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none !important;}html,body{-ms-overflow-style:none !important;scrollbar-width:none !important;}';
+      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{box-shadow:0 2px 8px rgba(0,0,0,0.18),0 0 0 2px #fff}50%{box-shadow:0 4px 16px rgba(0,0,0,0.22),0 0 0 3px rgba(255,255,255,0.9)}}@keyframes audit-tooltip-in{from{opacity:0;transform:translate(-50%,-100%) scale(0.95) translateY(4px)}to{opacity:1;transform:translate(-50%,-100%) scale(1) translateY(0)}}.audit-viewer-hotspot{display:flex !important;align-items:center;justify-content:center;width:26px !important;height:26px !important;min-width:26px !important;min-height:26px !important;animation:audit-hotspot-pulse 2.5s ease-in-out infinite !important;opacity:1 !important;visibility:visible !important;transition:transform 0.15s ease-out,box-shadow 0.15s ease-out !important;font-size:11px;font-weight:700;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1;user-select:none}.audit-viewer-hotspot:hover{transform:translate(-50%,-100%) scale(1.3) !important;box-shadow:0 4px 20px rgba(0,0,0,0.3),0 0 0 3px #fff !important;z-index:2147483645 !important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none !important;}html,body{-ms-overflow-style:none !important;scrollbar-width:none !important;}';
       document.head.appendChild(styleEl);
     }
     ensureTooltip();
@@ -674,15 +1203,18 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       el.className = 'audit-viewer-hotspot';
       el.setAttribute('data-pin-index', String(i));
       // position:fixed so it respects viewport coordinates
-      el.style.cssText = 'display:block !important;position:fixed;left:' + pos.vx + 'px;top:' + pos.vy + 'px;transform:translate(-50%,-100%);width:24px !important;height:24px !important;border-radius:50%;background:' + (categoryColors[pin.category] || '#3b82f6') + ' !important;border:2px solid #fff;cursor:pointer;z-index:2147483640;';
+      el.style.cssText = 'display:flex !important;align-items:center;justify-content:center;position:fixed;left:' + pos.vx + 'px;top:' + pos.vy + 'px;transform:translate(-50%,-100%);width:26px !important;height:26px !important;border-radius:50%;background:' + (categoryColors[pin.category] || '#3A3CFF') + ' !important;border:2px solid #fff;cursor:pointer;z-index:2147483640;';
+      el.textContent = String(i + 1);
       el.setAttribute('data-feedback', pin.feedback || '');
       el.setAttribute('data-category', pin.category || '');
       el.addEventListener('mouseenter', function() {
+        cancelHideTooltip();
         var curPos = computePinViewportPosition(pin, cachedScrollContainer);
         showTooltip(pin, i, curPos.vx, curPos.vy);
+        highlightPinTarget(pin);
       });
       el.addEventListener('mouseleave', function() {
-        hideTooltip();
+        scheduleHideTooltip();
       });
       hotspotElements.push(el);
       document.documentElement.appendChild(el);
@@ -690,6 +1222,24 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     // Start the rAF loop
     if (rafId) cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(updateAllPositions);
+
+    // After pin updates (e.g. reply posted → parent refresh → UPDATE_PINS), reopen the same thread so the modal does not disappear
+    if (reopenThread && pins && pins.length) {
+      var ni = -1;
+      if (reopenPinId) {
+        for (var rq = 0; rq < pins.length; rq++) {
+          if (pins[rq].id === reopenPinId) {
+            ni = rq;
+            break;
+          }
+        }
+      }
+      if (ni < 0 && reopenPinIndex >= 0 && reopenPinIndex < pins.length) ni = reopenPinIndex;
+      if (ni >= 0) {
+        var rpos = computePinViewportPosition(pins[ni], cachedScrollContainer);
+        showTooltip(pins[ni], ni, rpos.vx, rpos.vy);
+      }
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderHotspots);
@@ -723,27 +1273,40 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
 
   window.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'SET_COMMENT_MODE') {
-      commentMode = e.data.value;
-      document.body.style.cursor = commentMode ? 'crosshair' : '';
-      if (document.documentElement) document.documentElement.style.cursor = commentMode ? 'crosshair' : '';
-      if (commentMode) createHoverOverlay();
-      else hideHoverOverlay();
+      var newVal = e.data.value;
+      if (commentMode !== newVal) {
+        commentMode = newVal;
+        document.body.style.cursor = commentMode ? 'crosshair' : '';
+        if (document.documentElement) document.documentElement.style.cursor = commentMode ? 'crosshair' : '';
+        if (commentMode) createHoverOverlay();
+        else hideHoverOverlay();
+      }
     }
     if (e.data && e.data.type === 'UPDATE_PINS') {
       updateHotspotsFromPins(e.data.pins);
     }
     if (e.data && e.data.type === 'HIGHLIGHT') {
       var s = e.data.selector, x = e.data.x, y = e.data.y;
+      var persistent = !!e.data.persistent;
+      clearPinHighlight();
       if (s) {
         try {
           var el = document.querySelector(s);
-          if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.outline = '3px solid #0ea5e9'; el.style.outlineOffset = '2px'; setTimeout(function() { el.style.outline = ''; el.style.outlineOffset = ''; }, 3000); }
+          if (el) {
+            if (!e.data.noScroll) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.outline = '3px solid #0ea5e9'; el.style.outlineOffset = '2px';
+            _highlightedEl = el;
+            if (!persistent) _highlightTimer = setTimeout(function() { el.style.outline = ''; el.style.outlineOffset = ''; _highlightedEl = null; }, 3000);
+          }
         } catch (err) {}
       } else if (typeof x === 'number' && typeof y === 'number') {
         var vh = window.innerHeight, vw = window.innerWidth;
         var px = (x / 100) * vw, py = (y / 100) * vh;
-        window.scrollTo({ left: px - vw/2, top: py - vh/2, behavior: 'smooth' });
+        if (!e.data.noScroll) window.scrollTo({ left: px - vw/2, top: py - vh/2, behavior: 'smooth' });
       }
+    }
+    if (e.data && e.data.type === 'CLEAR_HIGHLIGHT') {
+      clearPinHighlight();
     }
     if (e.data && e.data.type === 'SHOW_TOOLTIP' && typeof e.data.pinIndex === 'number') {
       var idx = e.data.pinIndex;

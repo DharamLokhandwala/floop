@@ -2,7 +2,7 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.9702 0 0);
+  --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.141 0.005 285.823);
@@ -152,4 +152,13 @@ body {
 
 .animate-generating-dot {
   animation: generating-dot 1.4s ease-in-out infinite both;
+}
+
+@keyframes comment-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-comment-pulse {
+  animation: comment-pulse 1.6s ease-in-out infinite;
 }

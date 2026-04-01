@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { addUserPin as addPinToDb } from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -22,6 +23,7 @@ export async function POST(
     const body = await request.json();
 
     const pin: Pin = {
+      id: randomUUID(),
       x: body.x,
       y: body.y,
       category: body.category ?? "Feedback",
@@ -34,6 +36,7 @@ export async function POST(
       scrollY: body.scrollY,
       docX: body.docX,
       docY: body.docY,
+      ...(body.audioUrl ? { audioUrl: body.audioUrl } : {}),
     };
 
     if (

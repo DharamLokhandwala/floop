@@ -98,8 +98,8 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
         </Dialog>
       )}
 
-      <div className="space-y-2">
-        <label htmlFor="url" className="text-sm font-medium">
+      <div className="space-y-1.5">
+        <label htmlFor="url" className="block text-[11px] font-medium uppercase tracking-widest text-zinc-400">
           {urlLabel ?? "Website link"}
         </label>
         <Input
@@ -109,29 +109,28 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
           placeholder={urlPlaceholder ?? "https://yourwebsite.com"}
           required
           disabled={isPending}
-          className="w-full"
+          className="w-full h-11"
         />
       </div>
 
-      <div className="space-y-2">
-        <label htmlFor="goal" className="text-sm font-medium">
-          {goalLabel ?? "What should they focus on?"} <span className="text-muted-foreground font-normal">(optional)</span>
+      <div className="space-y-1.5">
+        <label htmlFor="goal" className="block text-[11px] font-medium uppercase tracking-widest text-zinc-400">
+          {goalLabel ?? "What should they focus on?"} <span className="normal-case tracking-normal font-normal text-zinc-300">(optional)</span>
         </label>
         <Textarea
           id="goal"
           name="goal"
           placeholder={goalPlaceholder ?? "e.g. Does the hero section communicate clearly? Is the about page convincing?"}
-          rows={4}
+          rows={3}
           disabled={isPending}
           className="w-full resize-none"
         />
       </div>
 
       {showReviewerName && (
-        <div className="space-y-2">
-          <label htmlFor="reviewerName" className="text-sm font-medium">
+        <div className="space-y-1.5">
+          <label htmlFor="reviewerName" className="block text-[11px] font-medium uppercase tracking-widest text-zinc-400">
             {reviewerNameLabel ?? "Reviewer name"}
-            {reviewerNameRequired && <span className="text-destructive"> </span>}
           </label>
           <Input
             id="reviewerName"
@@ -140,7 +139,7 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
             placeholder="e.g. Alex (from Apple)"
             required={reviewerNameRequired}
             disabled={isPending}
-            className="w-full"
+            className="w-full h-11"
           />
         </div>
       )}
@@ -175,7 +174,7 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
         </div>
       )}
 
-      <Button type="submit" disabled={isPending} className="w-full sm:w-auto">
+      <Button type="submit" disabled={isPending} className="w-full h-11 rounded-xl text-[15px] font-medium mt-2">
         {isPending ? (
           showReviewerName ? "Generating..." : "Creating..."
         ) : (

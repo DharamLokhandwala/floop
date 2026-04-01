@@ -20,11 +20,11 @@ export function DashboardTabToggle({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tab = (searchParams.get("tab") as Tab) || "requested";
+  const tab = (searchParams.get("tab") as Tab) || "given";
 
   const setTab = (t: Tab) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (t === "requested") {
+    if (t === "given") {
       params.delete("tab");
     } else {
       params.set("tab", t);
@@ -37,25 +37,6 @@ export function DashboardTabToggle({
     <div className="flex rounded-lg border border-border p-0.5 bg-muted/30 w-fit">
       <button
         type="button"
-        onClick={() => setTab("requested")}
-        className={cn(
-          "px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5",
-          tab === "requested"
-            ? "bg-background shadow text-foreground"
-            : "text-muted-foreground hover:text-foreground"
-        )}
-      >
-        Feedback requested ({requestedCount})
-        {requestedHasFeedback && (
-          <span
-            className="rounded-full size-2 shrink-0"
-            style={{ backgroundColor: PRIMARY_DOT }}
-            aria-hidden
-          />
-        )}
-      </button>
-      <button
-        type="button"
         onClick={() => setTab("given")}
         className={cn(
           "px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5",
@@ -66,6 +47,25 @@ export function DashboardTabToggle({
       >
         Feedback given ({givenCount})
         {givenHasNewComments && (
+          <span
+            className="rounded-full size-2 shrink-0"
+            style={{ backgroundColor: PRIMARY_DOT }}
+            aria-hidden
+          />
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={() => setTab("requested")}
+        className={cn(
+          "px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5",
+          tab === "requested"
+            ? "bg-background shadow text-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        Feedback requested ({requestedCount})
+        {requestedHasFeedback && (
           <span
             className="rounded-full size-2 shrink-0"
             style={{ backgroundColor: PRIMARY_DOT }}

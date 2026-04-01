@@ -1,18 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Copy } from "lucide-react";
 import { toast } from "sonner";
 import { setReviewerName } from "@/app/audit/[id]/actions";
+import { ModalShell } from "@/components/ui/modal-shell";
 
 interface ShareFeedbackLinkModalProps {
   auditId: string;
@@ -75,68 +70,70 @@ export function ShareFeedbackLinkModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Share your feedback link</DialogTitle>
-          <DialogDescription>
-            Share this link with reviewers. They can leave feedback without signing in.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 pt-2">
-          {!linkGenerated ? (
-            <>
-              <div className="space-y-2">
-                <label htmlFor="reviewer-name" className="text-sm font-medium">
-                  Who are you sharing this with? <span className="text-destructive">*</span>
-                </label>
-                <Input
-                  id="reviewer-name"
-                  type="text"
-                  placeholder="e.g. Alex, Design team"
-                  value={reviewerName}
-                  onChange={(e) => setReviewerNameState(e.target.value)}
-                  className="w-full"
-                  required
-                />
-              </div>
+    <ModalShell open={open} onOpenChange={onOpenChange}>
+      <DialogHeader className="mb-7">
+        <img src="/landing/floop-thin.svg" alt="floop" className="h-[14px] w-auto mb-5" />
+        <DialogTitle className="text-[1.45rem] font-regular tracking-tight text-zinc-900">
+          Share your feedback link
+        </DialogTitle>
+        <DialogDescription className="text-[13px] text-zinc-400 mt-2 leading-relaxed">
+          Share this link with reviewers — no sign-in required on their end.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="border-t border-zinc-100 mb-6" />
+
+      <div className="flex-1 flex flex-col space-y-4">
+        {!linkGenerated ? (
+          <>
+            <div className="space-y-1.5">
+              <label htmlFor="reviewer-name" className="block text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+                Who are you sharing this with?
+              </label>
+              <Input
+                id="reviewer-name"
+                type="text"
+                placeholder="e.g. Alex, Design team"
+                value={reviewerName}
+                onChange={(e) => setReviewerNameState(e.target.value)}
+                className="w-full h-11"
+                required
+              />
+            </div>
+            <Button
+              className="w-full h-11 rounded-xl text-[15px] font-medium mt-2"
+              onClick={handleGenerateLink}
+              disabled={!reviewerName.trim()}
+            >
+              Generate floop link
+            </Button>
+          </>
+        ) : (
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">Your floop link</p>
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                value={shareUrl}
+                className="font-mono text-xs flex-1 h-11"
+              />
               <Button
-                className="w-full"
-                onClick={handleGenerateLink}
-                disabled={!reviewerName.trim()}
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={handleCopyAgain}
+                className="shrink-0 h-11 w-11 rounded-xl"
+                aria-label="Copy link"
               >
-                Generate floop link
+                <Copy className="size-4" />
               </Button>
-            </>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Your floop link</p>
-                <div className="flex gap-2">
-                  <Input
-                    readOnly
-                    value={shareUrl}
-                    className="font-mono text-xs flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={handleCopyAgain}
-                    className="shrink-0"
-                    aria-label="Copy link"
-                  >
-                    <Copy className="size-4" />
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Send this link via email, Slack, or any channel. No account required for reviewers.
-                </p>
-              </div>
-            </>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+            </div>
+            <p className="text-[12px] text-zinc-400 mt-1 leading-relaxed">
+              Send via email, Slack, or any channel. No account needed for reviewers.
+            </p>
+          </div>
+        )}
+      </div>
+    </ModalShell>
   );
 }

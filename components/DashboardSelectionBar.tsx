@@ -3,27 +3,33 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Archive, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, Trash2, X } from "lucide-react";
 
 interface DashboardSelectionBarProps {
   selectedCount: number;
-  onArchive: () => Promise<void>;
+  onArchive?: () => Promise<void>;
+  onRestore?: () => Promise<void>;
   onDelete: () => Promise<void>;
   onClearSelection: () => void;
+  /** When true, show Restore instead of Archive. */
+  mode?: "default" | "archived";
 }
 
 export function DashboardSelectionBar({
   selectedCount,
   onArchive,
+  onRestore,
   onDelete,
   onClearSelection,
+  mode = "default",
 }: DashboardSelectionBarProps) {
   const router = useRouter();
   const [archiving, setArchiving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const handleArchive = async () => {
-    if (archiving) return;
+    if (archiving || !onArchive) return;
     setArchiving(true);
     try {
       await onArchive();
@@ -31,6 +37,18 @@ export function DashboardSelectionBar({
       router.refresh();
     } finally {
       setArchiving(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (restoring || !onRestore) return;
+    setRestoring(true);
+    try {
+      await onRestore();
+      onClearSelection();
+      router.refresh();
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -57,16 +75,29 @@ export function DashboardSelectionBar({
       <span className="text-sm text-muted-foreground mr-2">
         {selectedCount} selected
       </span>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={handleArchive}
-        disabled={archiving}
-      >
-        <Archive className="mr-2 size-4" />
-        {archiving ? "Archiving…" : "Archive"}
-      </Button>
+      {mode === "archived" ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleRestore}
+          disabled={restoring}
+        >
+          <ArchiveRestore className="mr-2 size-4" />
+          {restoring ? "Restoring…" : "Restore"}
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleArchive}
+          disabled={archiving}
+        >
+          <Archive className="mr-2 size-4" />
+          {archiving ? "Archiving…" : "Archive"}
+        </Button>
+      )}
       <Button
         type="button"
         variant="outline"

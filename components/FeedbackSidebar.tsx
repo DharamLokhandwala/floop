@@ -12,6 +12,8 @@ interface FeedbackSidebarProps {
   userPins: Pin[];
   selectedPinIndex: number | null;
   onSelectPin: (index: number) => void;
+  onHoverPin?: (index: number) => void;
+  onHoverLeave?: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
   createdAt: Date;
@@ -30,6 +32,8 @@ export function FeedbackSidebar({
   userPins,
   selectedPinIndex,
   onSelectPin,
+  onHoverPin,
+  onHoverLeave,
   collapsed,
   onToggleCollapse,
   createdAt,
@@ -42,7 +46,7 @@ export function FeedbackSidebar({
   return (
     <aside
       className={cn(
-        "flex flex-col border-border bg-muted/30 transition-[width] duration-200 overflow-hidden",
+        "flex flex-col border-border transition-[width] duration-200 overflow-hidden",
         collapsed ? "w-12 shrink-0" : "w-full lg:w-[320px] lg:min-w-[320px] max-h-[45vh] lg:max-h-none"
       )}
     >
@@ -101,11 +105,11 @@ export function FeedbackSidebar({
 
           {/* Feedback */}
           <section className="rounded-xl border border-border bg-background p-4 shadow-xs">
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-border">
+            <div className="flex items-center justify-between mb-3 pb-2">
               <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Feedback
               </span>
-              <RotateCcw className="h-4 w-4 text-muted-foreground" />
+              
             </div>
             <div className="space-y-2">
               {allPins.length === 0 ? (
@@ -116,6 +120,8 @@ export function FeedbackSidebar({
                     key={pin.index}
                     type="button"
                     onClick={() => onSelectPin(pin.index)}
+                    onMouseEnter={() => onHoverPin?.(pin.index)}
+                    onMouseLeave={() => onHoverLeave?.()}
                     className={cn(
                       "w-full text-left p-3 rounded-lg border transition-colors",
                       selectedPinIndex === pin.index
@@ -138,7 +144,17 @@ export function FeedbackSidebar({
                     {!pin.pageUrl && (
                       <p className="text-xs text-muted-foreground truncate mb-1">/index</p>
                     )}
-                    <p className="text-sm text-foreground line-clamp-2">{pin.feedback}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm text-foreground line-clamp-2 flex-1 min-w-0">{pin.feedback}</p>
+                      {(pin.replies?.length ?? 0) > 0 && (
+                        <span
+                          className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-primary/15 text-primary border border-primary/20"
+                          title={`${pin.replies!.length} repl${pin.replies!.length === 1 ? "y" : "ies"}`}
+                        >
+                          {pin.replies!.length}
+                        </span>
+                      )}
+                    </div>
                   </button>
                 ))
               )}
