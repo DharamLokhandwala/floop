@@ -7,10 +7,10 @@ import { Input } from "@/components/ui/input";
 
 type Mode = "password" | "magic";
 
-type LoginFormProps = { callbackUrl?: string; variant?: "default" | "resend" };
+type LoginFormProps = { callbackUrl?: string; variant?: "default" | "resend"; defaultMode?: Mode };
 
-export function LoginForm({ callbackUrl = "/dashboard", variant = "default" }: LoginFormProps) {
-  const [mode, setMode] = useState<Mode>("password");
+export function LoginForm({ callbackUrl = "/dashboard", variant = "default", defaultMode = "password" }: LoginFormProps) {
+  const [mode, setMode] = useState<Mode>(defaultMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");

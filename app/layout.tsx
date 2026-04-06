@@ -38,6 +38,10 @@ export default function RootLayout({
           href="https://api.fontshare.com/v2/css?f[]=general-sans@200,201,300,301,400,401,500,501,600,601,700,701&display=swap"
           rel="stylesheet"
         />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&display=swap"
+          rel="stylesheet"
+        />
       </head>
       <body
         className={`${geistMono.variable} antialiased`}

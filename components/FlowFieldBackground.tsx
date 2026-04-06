@@ -189,15 +189,26 @@ export function FlowFieldBackground({
     <div style={{ ...shared, overflow: "hidden" }}>
       {/* Mesh gradient — sits behind the canvas */}
       {hasMesh && (
-        <div
-          style={{
-            ...shared,
-            background: [
-              ...(meshGradient as string[]),
-              ...(backgroundColor ? [backgroundColor] : []),
-            ].join(", "),
-          }}
-        />
+        <>
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes abstract-mesh-drift {
+              0%   { transform: scale(1.3) translate(0%, 0%); }
+              33%  { transform: scale(1.3) translate(3%, -4%); }
+              66%  { transform: scale(1.3) translate(-3%, 3%); }
+              100% { transform: scale(1.3) translate(0%, 0%); }
+            }
+          `}} />
+          <div
+            style={{
+              ...shared,
+              animation: "abstract-mesh-drift 24s ease-in-out infinite",
+              background: [
+                ...(meshGradient as string[]),
+                ...(backgroundColor ? [backgroundColor] : []),
+              ].join(", "),
+            }}
+          />
+        </>
       )}
 
       {/* Flow-field canvas */}

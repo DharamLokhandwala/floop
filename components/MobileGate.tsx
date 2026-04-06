@@ -6,7 +6,7 @@ import Image from "next/image";
 import { FlowFieldBackground } from "@/components/FlowFieldBackground";
 
 const DESKTOP_BREAKPOINT = 1024;
-const LANDING_PATHS = ["/"];
+const LANDING_PATHS = ["/", "/beta-invite"];
 
 export function MobileGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
