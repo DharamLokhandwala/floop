@@ -1,9 +1,21 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { OnboardingState } from "@/app/onboarding/actions";
+
+function PasswordRule({ met, label }: { met: boolean; label: string }) {
+  return (
+    <span
+      className={`transition-colors duration-150 ${
+        met ? "line-through text-muted-foreground/50" : "text-muted-foreground"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
 
 export function OnboardingForm({
   action,
@@ -11,6 +23,17 @@ export function OnboardingForm({
   action: (prev: OnboardingState, formData: FormData) => Promise<OnboardingState>;
 }) {
   const [state, formAction, isPending] = useActionState<OnboardingState, FormData>(action, {});
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+
+  const rules = {
+    length: password.length >= 12,
+    uppercase: /[A-Z]/.test(password),
+    number: /[0-9]/.test(password),
+    special: /[^A-Za-z0-9]/.test(password),
+  };
+  const passwordsMatch = password.length > 0 && confirm.length > 0 && password === confirm;
+  const showMatchIndicator = confirm.length > 0;
 
   return (
     <form action={formAction} className="space-y-4">
@@ -45,9 +68,21 @@ export function OnboardingForm({
           type="password"
           autoComplete="new-password"
           required
-          minLength={8}
-          placeholder="At least 8 characters"
+          minLength={12}
+          placeholder="At least 12 characters"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
+        {password.length > 0 && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
+            <p className="text-xs w-full flex flex-wrap gap-x-4 gap-y-1">
+              <PasswordRule met={rules.length} label="12 characters minimum" />
+              <PasswordRule met={rules.uppercase} label="One uppercase" />
+              <PasswordRule met={rules.number} label="One number" />
+              <PasswordRule met={rules.special} label="One special character" />
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -60,9 +95,20 @@ export function OnboardingForm({
           type="password"
           autoComplete="new-password"
           required
-          minLength={8}
+          minLength={12}
           placeholder="Repeat password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
         />
+        {showMatchIndicator && (
+          <p
+            className={`text-xs transition-colors duration-150 ${
+              passwordsMatch ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+            }`}
+          >
+            {passwordsMatch ? "Passwords match" : "Passwords do not match yet"}
+          </p>
+        )}
       </div>
 
       <Button type="submit" className="w-full" disabled={isPending}>

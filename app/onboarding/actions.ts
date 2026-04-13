@@ -6,7 +6,7 @@ import { getCurrentUser, hashPassword } from "@/lib/auth";
 
 export type OnboardingState = { error?: string };
 
-const MIN_PASSWORD_LENGTH = 8;
+const MIN_PASSWORD_LENGTH = 12;
 
 export async function completeOnboarding(
   _prev: OnboardingState,
