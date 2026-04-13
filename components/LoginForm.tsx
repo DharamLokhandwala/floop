@@ -53,7 +53,7 @@ export function LoginForm({ callbackUrl = "/dashboard", variant = "default", def
     setError(null);
     try {
       const res = await signIn("email", {
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         callbackUrl: callbackUrl || "/dashboard",
         redirect: false,
       });
@@ -89,7 +89,7 @@ export function LoginForm({ callbackUrl = "/dashboard", variant = "default", def
             setError(null);
             try {
               const res = await signIn("email", {
-                email: email.trim(),
+                email: email.trim().toLowerCase(),
                 callbackUrl: callbackUrl || "/dashboard",
                 redirect: false,
               });

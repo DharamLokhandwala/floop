@@ -18,8 +18,8 @@ export async function completeOnboarding(
   if (user.name) redirect("/dashboard");
 
   const name = (formData.get("name") as string)?.trim() ?? "";
-  const password = (formData.get("password") as string)?.trim() ?? "";
-  const confirm = (formData.get("confirmPassword") as string)?.trim() ?? "";
+  const password = (formData.get("password") as string) ?? "";
+  const confirm = (formData.get("confirmPassword") as string) ?? "";
 
   if (!name) return { error: "Name is required." };
   if (password.length < MIN_PASSWORD_LENGTH) {
