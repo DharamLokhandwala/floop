@@ -66,8 +66,10 @@ async function captureScreenshotWithViewport(
   url: string,
   viewport: Viewport,
   fullPage: boolean,
-  ignoreHTTPSErrors: boolean
+  ignoreHTTPSErrors: boolean,
+  attempt = 1
 ): Promise<Buffer> {
+  const MAX_ATTEMPTS = 3;
   const launchOptions: Parameters<typeof playwrightChromium.launch>[0] = {
     headless: true,
     args: [
@@ -129,8 +131,22 @@ async function captureScreenshotWithViewport(
 
     await context.close();
     return Buffer.from(buffer);
+  } catch (err) {
+    await browser.close().catch(() => {});
+
+    // Playwright throws this when the browser/page crashes (common with --single-process
+    // mode on heavy JS sites like Squarespace). Retry up to MAX_ATTEMPTS times.
+    const isBrowserCrash =
+      err instanceof Error &&
+      /target page.*closed|context.*closed|browser.*closed|crashed/i.test(err.message);
+
+    if (isBrowserCrash && attempt < MAX_ATTEMPTS) {
+      return captureScreenshotWithViewport(url, viewport, fullPage, ignoreHTTPSErrors, attempt + 1);
+    }
+
+    throw err;
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {});
   }
 }
 
