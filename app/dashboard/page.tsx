@@ -32,6 +32,7 @@ export default async function DashboardPage({
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (!user.name) redirect("/onboarding");
 
   const params = await searchParams;
   const tab = params.tab === "requested" ? "requested" : "given";
