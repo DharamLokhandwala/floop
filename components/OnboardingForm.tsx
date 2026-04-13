@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { OnboardingState } from "@/app/onboarding/actions";
@@ -25,6 +26,8 @@ export function OnboardingForm({
   const [state, formAction, isPending] = useActionState<OnboardingState, FormData>(action, {});
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const rules = {
     length: password.length >= 12,
@@ -62,17 +65,29 @@ export function OnboardingForm({
         <label htmlFor="password" className="text-sm font-medium">
           Password
         </label>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={12}
-          placeholder="At least 12 characters"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+        <div className="relative">
+          <Input
+            id="password"
+            name="password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            required
+            minLength={12}
+            placeholder="At least 12 characters"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+            tabIndex={-1}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+          >
+            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {password.length > 0 && (
           <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
             <p className="text-xs w-full flex flex-wrap gap-x-4 gap-y-1">
@@ -89,17 +104,29 @@ export function OnboardingForm({
         <label htmlFor="confirmPassword" className="text-sm font-medium">
           Confirm password
         </label>
-        <Input
-          id="confirmPassword"
-          name="confirmPassword"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={12}
-          placeholder="Repeat password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-        />
+        <div className="relative">
+          <Input
+            id="confirmPassword"
+            name="confirmPassword"
+            type={showConfirm ? "text" : "password"}
+            autoComplete="new-password"
+            required
+            minLength={12}
+            placeholder="Repeat password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            className="pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShowConfirm((v) => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+            tabIndex={-1}
+            aria-label={showConfirm ? "Hide password" : "Show password"}
+          >
+            {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {showMatchIndicator && (
           <p
             className={`text-xs transition-colors duration-150 ${
