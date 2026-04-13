@@ -76,6 +76,11 @@ export type FlowFieldBackgroundProps = {
    * Higher = finer grain. Default `0.72`.
    */
   noiseFrequency?: number;
+  /**
+   * Global time multiplier for dash animation speed.
+   * `1` is default, `0` pauses animation.
+   */
+  timeScale?: number;
 };
 
 export function FlowFieldBackground({
@@ -87,8 +92,15 @@ export function FlowFieldBackground({
   meshGradient,
   noiseOpacity = 0,
   noiseFrequency = 0.72,
+  timeScale = 1,
 }: FlowFieldBackgroundProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hasMesh = !!(meshGradient && meshGradient.length > 0);
+  const hasNoise = noiseOpacity > 0;
+
+  // Use a ref to store latest animation props so we don't restart the loop
+  const animProps = useRef({ dashColor, dashThickness, dashMinLength, dashMaxLength, timeScale });
+  animProps.current = { dashColor, dashThickness, dashMinLength, dashMaxLength, timeScale };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -101,10 +113,11 @@ export function FlowFieldBackground({
     let time = 0;
     let animId: number;
 
-    const minCoeff = Math.min(dashMinLength, dashMaxLength);
-    const maxCoeff = Math.max(dashMinLength, dashMaxLength);
-
     const draw = () => {
+      const { dashColor, dashThickness, dashMinLength, dashMaxLength, timeScale } = animProps.current;
+      const minCoeff = Math.min(dashMinLength, dashMaxLength);
+      const maxCoeff = Math.max(dashMinLength, dashMaxLength);
+
       const W = canvas.offsetWidth;
       const H = canvas.offsetHeight;
       const dpr = window.devicePixelRatio || 1;
@@ -116,10 +129,6 @@ export function FlowFieldBackground({
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      if (backgroundColor) {
-        ctx.fillStyle = backgroundColor;
-        ctx.fillRect(0, 0, W, H);
-      }
 
       const cellW = W / COLS;
       const cellH = H / ROWS;
@@ -148,7 +157,9 @@ export function FlowFieldBackground({
             Math.sin(time * 0.55 + nx * Math.PI * 1.2 - ny * Math.PI * 2.8) * 0.05;
 
           const tVal = base + wave;
-          const angle = tVal * Math.PI * 0.72;
+          // Continuous clockwise spin plus local flow-field offset.
+          const spin = time * 1.6;
+          const angle = spin + tVal * Math.PI * 2;
           const len = minLen + (maxLen - minLen) * Math.min(Math.abs(tVal) * 2.2, 1);
 
           const dx = Math.cos(angle) * len / 2;
@@ -162,13 +173,13 @@ export function FlowFieldBackground({
       }
 
       // ~18 s per full wave cycle  (2π / (18 × 60fps) ≈ 0.00582)
-      time += 0.0090;
+      time += 0.0090 * Math.max(0, timeScale);
       animId = requestAnimationFrame(draw);
     };
 
     draw();
     return () => cancelAnimationFrame(animId);
-  }, [backgroundColor, dashColor, dashThickness, dashMinLength, dashMaxLength]);
+  }, []);
 
   const shared: React.CSSProperties = {
     position: "absolute",
@@ -177,16 +188,23 @@ export function FlowFieldBackground({
     height: "100%",
   };
 
-  const hasMesh = meshGradient && meshGradient.length > 0;
-  const hasNoise = noiseOpacity > 0;
-
-  // If no extra layers, return just the canvas (preserves original behaviour)
-  if (!hasMesh && !hasNoise) {
+  // If no extra layers (and no explicit base), return just the canvas.
+  if (!hasMesh && !hasNoise && !backgroundColor) {
     return <canvas ref={canvasRef} style={{ ...shared, display: "block" }} />;
   }
 
   return (
     <div style={{ ...shared, overflow: "hidden" }}>
+      {/* Base background color behind all layers */}
+      {backgroundColor && (
+        <div
+          style={{
+            ...shared,
+            backgroundColor,
+          }}
+        />
+      )}
+
       {/* Mesh gradient — sits behind the canvas */}
       {hasMesh && (
         <>
@@ -202,10 +220,7 @@ export function FlowFieldBackground({
             style={{
               ...shared,
               animation: "abstract-mesh-drift 24s ease-in-out infinite",
-              background: [
-                ...(meshGradient as string[]),
-                ...(backgroundColor ? [backgroundColor] : []),
-              ].join(", "),
+              background: (meshGradient as string[]).join(", "),
             }}
           />
         </>
