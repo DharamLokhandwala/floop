@@ -4,76 +4,48 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
-import { MeshGradient } from "../MeshGradient";
-
-/**
- * Shared quote shown in the right panel of all floop modals.
- * Change it here once — updates everywhere.
- */
-const MODAL_QUOTE = (
-  <>
-    &ldquo;The element on top of X near Y besides Z needs to be moved to the
-    left&rdquo; wastes time. floop&nbsp;does&nbsp;not.
-    <br />
-    Just start flooping!
-  </>
-);
-
-/** Purple right-hand panel shown on md+ screens. */
-export function ModalRightPanel() {
-  return (
-    <div className="hidden md:flex w-1/2 shrink-0 flex-col justify-between p-12 overflow-hidden">
-      <p className="text-white text-[1.75rem] font-serif leading-relaxed tracking-tight">
-      
-        {MODAL_QUOTE}
-      </p>
-    </div>
-  );
-}
+import Image from "next/image";
 
 interface ModalShellProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Left-column content (white card). */
   children: React.ReactNode;
+  /** Optional illustration to show on the right side. */
+  illustrationSrc?: string;
 }
 
 /**
  * Two-column branded modal shell used across all floop flows:
  * - Left: white rounded card with `children`
- * - Right: purple panel with shared quote (hidden on mobile)
- * - Bottom-right: floop wordmark
- *
- * Usage:
- *   <ModalShell open={open} onOpenChange={setOpen}>
- *     <DialogHeader>…</DialogHeader>
- *     <YourForm />
- *   </ModalShell>
+ * - Right: purple panel with shared illustration (hidden on mobile)
  */
-export function ModalShell({ open, onOpenChange, children }: ModalShellProps) {
+export function ModalShell({ open, onOpenChange, children, illustrationSrc = "/popup-give-feedback.svg" }: ModalShellProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="p-0 sm:max-w-[860px] overflow-hidden gap-0 rounded-3xl border border-indigo-300 bg-[#788BE6]"
+        className="p-0 sm:max-w-5xl !max-w-5xl overflow-hidden gap-0 rounded-[2rem] border-none shadow-2xl bg-[#7B8CF6] md:min-h-[600px]"
         showCloseButton={false}
       >
-        <div className="relative flex min-h-[540px]">
-          {/* Left — form card */}
-          <div className="w-full md:w-1/2 p-6">
-            <div className="bg-white rounded-2xl h-full flex flex-col p-8">
+        <div className="w-full h-full flex flex-col md:flex-row min-h-[600px]">
+          {/* Left Side: Form Container */}
+          <div className="w-full md:w-1/2 bg-background m-3 rounded-[1.5rem] p-8 md:p-12 flex flex-col shrink-0 justify-center">
+            <div className="w-full max-w-sm mx-auto flex flex-col justify-center h-full">
               {children}
             </div>
           </div>
 
-          <ModalRightPanel />
-
-          {/* floop wordmark — bottom-right */}
-          <img
-            src="/landing/floop-thin.svg"
-            alt="floop"
-            className="absolute bottom-5 right-6 h-[13px] w-auto pointer-events-none"
-            style={{ filter: "brightness(0) invert(1)" }}
-          />
+          {/* Right Side: Illustration Container */}
+          <div className="hidden md:flex w-full md:w-1/2 items-center justify-center p-12 relative">
+            <Image
+              src={illustrationSrc}
+              alt="Feedback illustration"
+              width={400}
+              height={400}
+              className="w-full max-w-[320px] h-auto object-contain"
+              priority
+            />
+          </div>
         </div>
       </DialogContent>
     </Dialog>

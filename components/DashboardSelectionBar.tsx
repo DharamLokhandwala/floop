@@ -27,6 +27,7 @@ export function DashboardSelectionBar({
   const [archiving, setArchiving] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleArchive = async () => {
     if (archiving || !onArchive) return;
@@ -35,6 +36,8 @@ export function DashboardSelectionBar({
       await onArchive();
       onClearSelection();
       router.refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to archive");
     } finally {
       setArchiving(false);
     }
@@ -47,6 +50,8 @@ export function DashboardSelectionBar({
       await onRestore();
       onClearSelection();
       router.refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to restore");
     } finally {
       setRestoring(false);
     }
@@ -54,19 +59,16 @@ export function DashboardSelectionBar({
 
   const handleDelete = async () => {
     if (deleting) return;
-    if (
-      !confirm(
-        `Delete ${selectedCount} website feedback${selectedCount > 1 ? "s" : ""} permanently?`
-      )
-    )
-      return;
     setDeleting(true);
     try {
       await onDelete();
       onClearSelection();
       router.refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to delete");
     } finally {
       setDeleting(false);
+      setShowConfirm(false);
     }
   };
 
@@ -98,17 +100,41 @@ export function DashboardSelectionBar({
           {archiving ? "Archiving…" : "Archive"}
         </Button>
       )}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={handleDelete}
-        disabled={deleting}
-        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-      >
-        <Trash2 className="mr-2 size-4" />
-        {deleting ? "Deleting…" : "Delete"}
-      </Button>
+      {showConfirm ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-destructive">Are you sure?</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowConfirm(false)}
+            disabled={deleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={handleDelete}
+            disabled={deleting}
+          >
+            {deleting ? "Deleting…" : "Confirm"}
+          </Button>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setShowConfirm(true)}
+          disabled={deleting}
+          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+        >
+          <Trash2 className="mr-2 size-4" />
+          Delete
+        </Button>
+      )}
       <Button
         type="button"
         variant="ghost"

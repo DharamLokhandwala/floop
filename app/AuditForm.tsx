@@ -144,35 +144,7 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
         </div>
       )}
 
-      {isPending && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">
-              {showReviewerName ? "Creating your floop link" : "Just a few a seconds to floop"}
-            </span>
-            <span className="flex gap-1.5 items-center">
-              <span
-                className="size-2 rounded-full bg-primary animate-generating-dot"
-                style={{ animationDelay: "0ms" }}
-              />
-              <span
-                className="size-2 rounded-full bg-primary animate-generating-dot"
-                style={{ animationDelay: "200ms" }}
-              />
-              <span
-                className="size-2 rounded-full bg-primary animate-generating-dot"
-                style={{ animationDelay: "400ms" }}
-              />
-            </span>
-          </div>
-          <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full w-1/3 rounded-full bg-primary/80 animate-generating-shimmer"
-              aria-hidden
-            />
-          </div>
-        </div>
-      )}
+
 
       <Button type="submit" disabled={isPending} className="w-full h-11 rounded-xl text-[15px] font-medium mt-2">
         {isPending ? (

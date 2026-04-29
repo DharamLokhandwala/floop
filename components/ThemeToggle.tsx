@@ -7,6 +7,10 @@ import { useTheme } from "./ThemeProvider";
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
 
+  // Commenting out dark mode functionality for now
+  return null;
+
+  /*
   return (
     <Button
       variant="ghost"
@@ -21,4 +25,5 @@ export function ThemeToggle() {
       )}
     </Button>
   );
+  */
 }

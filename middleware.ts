@@ -4,7 +4,7 @@ export default withAuth({
   pages: { signIn: "/login" },
 });
 
-// Only protect dashboard; /audit/* is public so shared links can be viewed without sign-in
+// Protect dashboard and onboarding. /audit/* is public so shared links work without sign-in.
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/onboarding"],
 };

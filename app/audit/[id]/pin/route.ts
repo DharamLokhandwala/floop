@@ -26,8 +26,14 @@ export async function DELETE(
   }
 
   const createdById = (audit as AuditRow).createdById;
-  if (!createdById || createdById !== user.id) {
-    return NextResponse.json({ error: "Only the audit owner can delete comments" }, { status: 403 });
+  const allPins = [...audit.pins, ...audit.userPins];
+  const pin = allPins.find((p) => p.id === pinId);
+  
+  const isAuditOwner = !!createdById && createdById === user.id;
+  const isPinAuthor = !!pin?.authorId && pin.authorId === user.id;
+  
+  if (!isAuditOwner && !isPinAuthor) {
+    return NextResponse.json({ error: "You do not have permission to delete this comment" }, { status: 403 });
   }
 
   try {

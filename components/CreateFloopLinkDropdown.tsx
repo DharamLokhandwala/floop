@@ -35,17 +35,13 @@ export function CreateFloopLinkDropdown({ directAction }: { directAction?: "requ
   return (
     <>
       {directAction === "request" ? (
-        <Button variant="default" className="w-full" style={{ backgroundColor: "var(--color-floop-blue)" }} onClick={() => setRequestModalOpen(true)}>
-          Create floop link
-        </Button>
+        <Button className="w-full" onClick={() => setRequestModalOpen(true)}>Create floop link</Button>
       ) : directAction === "give" ? (
-        <Button variant="default" className="w-full" style={{ backgroundColor: "var(--color-floop-blue)" }} onClick={() => setGiveModalOpen(true)}>
-          Give feedback
-        </Button>
+        <Button className="w-full" onClick={() => setGiveModalOpen(true)}>Give feedback</Button>
       ) : (
         <DropdownMenu>
           <DropdownMenuTrigger asChild className="size-auto! h-auto! w-auto! min-w-0!">
-            <Button variant="default" className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/85! hover:text-primary-foreground!">
+            <Button variant="default" className="shrink-0">
               <Plus className="w-4 h-4 shrink-0" />
               <span>Create floop link</span>
             </Button>
@@ -64,14 +60,19 @@ export function CreateFloopLinkDropdown({ directAction }: { directAction?: "requ
       )}
 
       {/* Request feedback modal */}
-      <ModalShell open={requestModalOpen} onOpenChange={setRequestModalOpen}>
-        <DialogHeader className="mb-7">
-          <DialogTitle className="text-[1.45rem] font-semibold tracking-tight text-zinc-900">Request feedback</DialogTitle>
-          <DialogDescription className="text-[1rem] text-zinc-400 leading-relaxed">
-            Reviewers can leave pins on your website without signing in.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="border-t border-zinc-100 mb-6" />
+      <ModalShell 
+        open={requestModalOpen} 
+        onOpenChange={setRequestModalOpen}
+        illustrationSrc="/popup-requested-feedback.svg"
+      >
+        <div className="flex flex-col items-center text-center space-y-4 mb-8">
+          <DialogHeader className="space-y-2 flex flex-col items-center text-center sm:text-center w-full">
+            <DialogTitle className="text-3xl font-bold tracking-tight text-foreground text-center sm:text-center w-full">Request feedback</DialogTitle>
+            <DialogDescription className="text-muted-foreground text-[15px] max-w-[280px] mx-auto leading-relaxed text-center sm:text-center">
+              Reviewers can leave pins on your website without signing in.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
         <AuditForm
           action={runRequestFeedbackLink}
           submitLabel="Generate floop link"
@@ -95,13 +96,14 @@ export function CreateFloopLinkDropdown({ directAction }: { directAction?: "requ
 
       {/* Give feedback modal */}
       <ModalShell open={giveModalOpen} onOpenChange={setGiveModalOpen}>
-        <DialogHeader className="mb-7">
-          <DialogTitle className="text-[1.45rem] font-semibold tracking-tight text-zinc-900">Give feedback</DialogTitle>
-          <DialogDescription className="text-[1rem] text-zinc-400 leading-relaxed">
-            Enter a website URL and drop pins directly on the live page.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="border-t border-zinc-100 mb-6" />
+        <div className="flex flex-col items-center text-center space-y-4 mb-8">
+          <DialogHeader className="space-y-2 flex flex-col items-center text-center sm:text-center w-full">
+            <DialogTitle className="text-3xl font-bold tracking-tight text-foreground text-center sm:text-center w-full">Give feedback</DialogTitle>
+            <DialogDescription className="text-muted-foreground text-[15px] max-w-[280px] mx-auto leading-relaxed text-center sm:text-center">
+              Enter a website URL and drop pins directly on the live page.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
         <AuditForm
           action={runAudit}
           submitLabel="Give feedback to others"

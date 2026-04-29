@@ -145,6 +145,8 @@ export async function GET(
   const viewerScript = getViewerScript(id, targetUrl.href, pinsForPage, {
     viewerAuthenticated,
     viewerIsOwner,
+    viewerUserId: sessionUser?.id ?? null,
+    viewerName: sessionUser?.name || sessionUser?.email || null,
   });
   if (html.includes("</body>")) {
     html = html.replace("</body>", `${viewerScript}</body>`);
@@ -317,12 +319,17 @@ function rewriteResourceUrls(
 /**
  * Removes crossorigin and integrity attributes that would break proxied
  * resources. Also removes nonce attributes since the CSP doesn't match.
+ * Strips <meta http-equiv="Content-Security-Policy"> tags so the website's
+ * own CSP doesn't block our injected inline viewer script.
  */
 function stripCorsAttributes(html: string): string {
   return html
     .replace(/\s+crossorigin(?:\s*=\s*["'][^"']*["'])?/gi, "")
     .replace(/\s+integrity\s*=\s*["'][^"']*["']/gi, "")
-    .replace(/\s+nonce\s*=\s*["'][^"']*["']/gi, "");
+    .replace(/\s+nonce\s*=\s*["'][^"']*["']/gi, "")
+    // Remove CSP meta tags so the site's policy doesn't block our inline script
+    .replace(/<meta\s[^>]*http-equiv\s*=\s*["']content-security-policy["'][^>]*>/gi, "")
+    .replace(/<meta\s[^>]*content\s*=\s*["'][^"']*["'][^>]*http-equiv\s*=\s*["']content-security-policy["'][^>]*>/gi, "");
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +433,8 @@ interface PinForScript {
   scrollY?: number;
   docX?: number;
   docY?: number;
+  authorId?: string;
+  authorName?: string;
   replies?: Array<{
     id: string;
     userId: string;
@@ -439,16 +448,19 @@ function getViewerScript(
   auditId: string,
   pageUrl: string,
   pins: PinForScript[],
-  viewerContext: { viewerAuthenticated: boolean; viewerIsOwner: boolean }
+  viewerContext: { viewerAuthenticated: boolean; viewerIsOwner: boolean; viewerUserId: string | null; viewerName: string | null }
 ): string {
   const pinsJson = JSON.stringify(pins);
   const vAuth = JSON.stringify(viewerContext.viewerAuthenticated);
   const vOwner = JSON.stringify(viewerContext.viewerIsOwner);
+  const vUserId = JSON.stringify(viewerContext.viewerUserId);
+  const vName = JSON.stringify(viewerContext.viewerName);
   const script = `
 <script>
-window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson}, viewerAuthenticated: ${vAuth}, viewerIsOwner: ${vOwner} };
+window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson}, viewerAuthenticated: ${vAuth}, viewerIsOwner: ${vOwner}, viewerUserId: ${vUserId}, viewerName: ${vName} };
 (function() {
   var commentMode = false;
+  var ctrlHeld = false; // tracks whether the modifier key is physically held in this frame
   var hotspotElements = [];
   var categoryColors = { SEO: '#3b82f6', 'Visual Design': '#a855f7', CRO: '#22c55e', Feedback: '#3A3CFF' };
 
@@ -501,18 +513,21 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
 
   document.addEventListener('keydown', function(e) {
     if ((isMac && e.key === 'Meta') || (!isMac && e.key === 'Control')) {
+      ctrlHeld = true;
       setCommentModeFromKey(true);
     }
   });
   document.addEventListener('keyup', function(e) {
     if ((isMac && e.key === 'Meta') || (!isMac && e.key === 'Control')) {
+      ctrlHeld = false;
       setCommentModeFromKey(false);
     }
   });
-  window.addEventListener('blur', function() { setCommentModeFromKey(false); });
+  window.addEventListener('blur', function() { ctrlHeld = false; setCommentModeFromKey(false); });
 
   document.addEventListener('mousemove', function(e) {
     var modHeld = isModifierHeld(e);
+    ctrlHeld = modHeld; // keep ctrlHeld in sync via mouse events (covers case where keydown fired in parent frame)
     if (modHeld !== commentMode) setCommentModeFromKey(modHeld);
     if (!commentMode) { hideHoverOverlay(); return; }
     createHoverOverlay();
@@ -735,6 +750,23 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       '#audit-viewer-tooltip.audit-figma-root .af-header-actions{display:flex;align-items:center;gap:2px;}' +
       '#audit-viewer-tooltip.audit-figma-root .af-trash-btn{color:#be123c;}' +
       '#audit-viewer-tooltip.audit-figma-root .af-trash-btn:hover{background:rgba(190,18,60,0.08);color:#9f1239;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-btn{color:#6b7280;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-btn:hover{background:rgba(58,60,255,0.08);color:#3A3CFF;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-ta{width:100%;box-sizing:border-box;border:1px solid rgba(58,60,255,0.3);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;background:#fff;min-height:50px;resize:none;line-height:1.5;transition:border-color 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-ta:focus{outline:none;border-color:rgba(58,60,255,0.6);}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:6px;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-cancel{background:none;border:1px solid #e5e7eb;border-radius:6px;padding:4px 10px;font-size:12px;font-family:inherit;cursor:pointer;color:#6b7280;transition:background 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-cancel:hover{background:#f3f4f6;color:#111827;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-save{background:#3A3CFF;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-family:inherit;cursor:pointer;color:#fff;font-weight:500;transition:background 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-save:hover{background:#2d2fcc;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-edit-save:disabled{opacity:0.5;cursor:default;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-reply-msg:hover .af-reply-actions{opacity:1!important;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-confirm-bar{display:flex;align-items:center;gap:6px;padding:6px 16px;background:rgba(254,242,242,0.8);border-top:1px solid rgba(239,68,68,0.15);font-size:12px;color:#991b1b;flex-shrink:0;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-confirm-bar span{flex:1;min-width:0;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-confirm-yes{background:#dc2626;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-confirm-yes:hover{background:#b91c1c;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-confirm-no{background:none;border:1px solid #e5e7eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;color:#6b7280;font-family:inherit;transition:background 0.15s;}' +
+      '#audit-viewer-tooltip.audit-figma-root .af-confirm-no:hover{background:#f3f4f6;}' +
       '#audit-viewer-tooltip.audit-figma-root .af-err{font-size:11px;color:#dc2626;margin-top:6px;display:block;}';
     document.head.appendChild(st);
   }
@@ -774,25 +806,38 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     var aid = av.auditId;
     var viewerAuthenticated = !!av.viewerAuthenticated;
     var viewerIsOwner = !!av.viewerIsOwner;
+    var viewerUserId = av.viewerUserId || null;
     var cat = escHtml(pin.category || 'Feedback');
     var text = escHtml(pin.feedback || ('Comment ' + (i + 1)));
     var pinId = pin.id || '';
     var replies = pin.replies || [];
+    var pinAuthorId = pin.authorId || null;
+    var pinAuthorName = pin.authorName || null;
+    var canEditPin = !!(pinId && viewerAuthenticated && (viewerIsOwner || (viewerUserId && pinAuthorId && viewerUserId === pinAuthorId)));
+    var canDeletePin = canEditPin;
     /* Default: comment + Reply button only; composer shows after user clicks Reply (same for threads). */
     tooltipEl.className = 'audit-figma-root';
 
+    var editBtnHtml = '';
+    if (canEditPin) {
+      editBtnHtml = '<button type="button" class="af-header-btn af-edit-btn" id="audit-pin-edit-btn" aria-label="Edit comment" title="Edit comment"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>';
+    }
     var trashBtnHtml = '';
-    if (viewerIsOwner && pinId) {
+    if (canDeletePin) {
       trashBtnHtml = '<button type="button" class="af-header-btn af-trash-btn" id="audit-pin-delete-btn" aria-label="Delete comment" title="Delete comment"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></button>';
     }
-    var headerHtml = '<div class="af-header"><span class="af-header-title">' + cat + '</span><div class="af-header-actions">' + trashBtnHtml +
+    var headerHtml = '<div class="af-header"><span class="af-header-title">' + cat + '</span><div class="af-header-actions">' + editBtnHtml + trashBtnHtml +
       '<button type="button" class="af-header-btn" aria-label="Close" onclick="document.getElementById(\\'audit-viewer-tooltip\\').style.display=\\'none\\'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>' +
       '</div>';
-    var deleteErrHtml = (viewerIsOwner && pinId) ? '<span id="audit-pin-delete-err" class="af-err" style="padding:0 16px;"></span>' : '';
+    var deleteErrHtml = canDeletePin ? '<span id="audit-pin-delete-err" class="af-err" style="padding:0 16px;"></span>' : '';
 
-    var dateStr = pin.createdAt ? '<span style="color:rgba(107,114,128,0.4);line-height:1;">·</span><span style="font-size:10px;color:rgba(107,114,128,0.7);">' + escHtml(timeAgo(pin.createdAt)) + '</span>' : '';
-    var rootRow = '<div class="af-msg"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#000;background:#FACC15;text-transform:uppercase;">' + escHtml(authorInitials('Dharam')) + '</div><span class="af-name" style="display:flex;align-items:center;gap:6px;"><span>Dharam Lokhandwala</span>' + dateStr + '</span></div><div class="af-bubble">' + text + '</div></div>';
-    
+    var displayAuthorName = pinAuthorName || (viewerIsOwner ? (av.viewerName || 'You') : 'Author');
+    var displayAuthorInitial = escHtml(authorInitials(displayAuthorName));
+    var displayAuthorBg = replyAvatarBg(displayAuthorName);
+    var displayAuthorColor = '#fff';
+    var dateStr = pin.createdAt ? '<span style="color:rgba(107,114,128,0.4);line-height:1;">\u00b7</span><span style="font-size:10px;color:rgba(107,114,128,0.7);">' + escHtml(timeAgo(pin.createdAt)) + '</span>' : '';
+    var rootRow = '<div class="af-msg"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:' + displayAuthorColor + ';background:' + displayAuthorBg + ';text-transform:uppercase;">' + displayAuthorInitial + '</div><span class="af-name" style="display:flex;align-items:center;gap:6px;"><span>' + escHtml(displayAuthorName) + '</span>' + dateStr + '</span></div><div class="af-bubble" id="audit-pin-bubble">' + text + '</div></div>';
+
     var repliesHtml = '';
     for (var ri = 0; ri < replies.length; ri++) {
       var r = replies[ri];
@@ -800,8 +845,16 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       var rb = escHtml(r.body || '');
       var ini = escHtml(authorInitials(r.authorName));
       var bg = replyAvatarBg(r.authorName);
-      var rDateStr = r.createdAt ? '<span style="color:rgba(107,114,128,0.4);line-height:1;">·</span><span style="font-size:10px;color:rgba(107,114,128,0.7);">' + escHtml(timeAgo(r.createdAt)) + '</span>' : '';
-      repliesHtml += '<div class="af-msg" style="padding-top:4px;"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#fff;background:' + bg + ';text-transform:uppercase;">' + ini + '</div><span class="af-name" style="display:flex;align-items:center;gap:6px;"><span>' + ra + '</span>' + rDateStr + '</span></div><div class="af-bubble">' + rb + '</div></div>';
+      var rDateStr = r.createdAt ? '<span style="color:rgba(107,114,128,0.4);line-height:1;">\u00b7</span><span style="font-size:10px;color:rgba(107,114,128,0.7);">' + escHtml(timeAgo(r.createdAt)) + '</span>' : '';
+      var canEditReply = !!(viewerAuthenticated && (viewerIsOwner || (viewerUserId && r.userId && viewerUserId === r.userId)));
+      var replyActionsHtml = '';
+      if (canEditReply) {
+        replyActionsHtml = '<span class="af-reply-actions" style="display:inline-flex;align-items:center;gap:1px;opacity:0;transition:opacity 0.15s;margin-left:auto;flex-shrink:0;">' +
+          '<button type="button" class="af-header-btn af-edit-btn af-reply-edit-btn" data-reply-id="' + escHtml(r.id) + '" data-reply-idx="' + ri + '" aria-label="Edit reply" title="Edit reply" style="padding:2px;"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>' +
+          '<button type="button" class="af-header-btn af-trash-btn af-reply-delete-btn" data-reply-id="' + escHtml(r.id) + '" data-reply-idx="' + ri + '" aria-label="Delete reply" title="Delete reply" style="padding:2px;"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>' +
+          '</span>';
+      }
+      repliesHtml += '<div class="af-msg af-reply-msg" style="padding-top:4px;" data-reply-id="' + escHtml(r.id) + '"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#fff;background:' + bg + ';text-transform:uppercase;">' + ini + '</div><span class="af-name" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;"><span>' + ra + '</span>' + rDateStr + '</span>' + replyActionsHtml + '</div><div class="af-bubble af-reply-bubble" id="af-reply-bubble-' + ri + '">' + rb + '</div></div>';
     }
     
     var replyBox = '';
@@ -810,9 +863,12 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       for (var wbi = 0; wbi < 12; wbi++) {
         afWaveBars += '<span class="af-reply-wave-bar"></span>';
       }
+      var composerName = av.viewerName || 'You';
+      var composerInitial = escHtml(authorInitials(composerName));
+      var composerBg = replyAvatarBg(composerName);
       replyBox = '<div class="af-composer">' +
         '<button class="af-initial-reply" onclick="document.getElementById(\\'audit-viewer-tooltip\\').classList.add(\\'is-replying\\')">Reply <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg></button>' +
-        '<div class="af-composer-state2"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#fff;background:#3A3CFF;text-transform:uppercase;">' + escHtml(authorInitials('Dharam')) + '</div><span class="af-name">Dharam Lokhandwala</span></div><div class="af-composer-row"><div class="af-reply-field"><input type="text" id="audit-pin-reply-ta" class="af-ta" placeholder="Write a reply…" autocomplete="off"/><div id="audit-pin-reply-wave" class="af-reply-wave" style="display:none" aria-hidden="true">' + afWaveBars + '</div></div><button type="button" class="af-mic-btn" id="audit-pin-reply-mic" title="Record voice reply" aria-label="Record voice reply"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="23"/></svg></button><button type="button" class="af-btn" id="audit-pin-reply-btn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>' +
+        '<div class="af-composer-state2"><div style="display:flex;align-items:center;gap:6px;"><div style="width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#fff;background:' + composerBg + ';text-transform:uppercase;">' + composerInitial + '</div><span class="af-name">' + escHtml(composerName) + '</span></div><div class="af-composer-row"><div class="af-reply-field"><input type="text" id="audit-pin-reply-ta" class="af-ta" placeholder="Write a reply\u2026" autocomplete="off"/><div id="audit-pin-reply-wave" class="af-reply-wave" style="display:none" aria-hidden="true">' + afWaveBars + '</div></div><button type="button" class="af-mic-btn" id="audit-pin-reply-mic" title="Record voice reply" aria-label="Record voice reply"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="23"/></svg></button><button type="button" class="af-btn" id="audit-pin-reply-btn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>' +
         '<span id="audit-pin-reply-err" class="af-err"></span></div>';
     }
     tooltipEl.innerHTML = headerHtml + deleteErrHtml + '<div class="af-messages">' + rootRow + repliesHtml + '</div>' + replyBox;
@@ -1049,26 +1105,191 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     var delBtn = document.getElementById('audit-pin-delete-btn');
     if (delBtn) {
       delBtn.onclick = function() {
-        if (!confirm('Delete this comment?')) return;
+        cancelHideTooltip();
+        /* Remove any existing confirm bar */
+        var oldBar = tooltipEl.querySelector('.af-confirm-bar');
+        if (oldBar) { oldBar.remove(); return; }
         var errEl = document.getElementById('audit-pin-delete-err');
         if (errEl) errEl.textContent = '';
         var p = av.pins && av.pins[activeTooltipIndex];
         var pid = p && p.id;
         if (!pid) { if (errEl) errEl.textContent = 'Missing pin id'; return; }
-        delBtn.disabled = true;
-        fetch('/audit/' + aid + '/pin?pinId=' + encodeURIComponent(pid), { method: 'DELETE', credentials: 'include' })
-          .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
-          .then(function(x) {
-            delBtn.disabled = false;
-            if (!x.res.ok) throw new Error(x.data.error || 'Failed');
-            if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
-            hideTooltip();
-          })
-          .catch(function(e) {
-            delBtn.disabled = false;
-            if (errEl) errEl.textContent = e.message || 'Failed';
-          });
+        /* Show inline confirm bar */
+        var bar = document.createElement('div');
+        bar.className = 'af-confirm-bar';
+        bar.innerHTML = '<span>Delete this comment?</span><button type="button" class="af-confirm-no">No</button><button type="button" class="af-confirm-yes">Yes</button>';
+        tooltipEl.appendChild(bar);
+        bar.querySelector('.af-confirm-no').onclick = function() { bar.remove(); };
+        bar.querySelector('.af-confirm-yes').onclick = function() {
+          bar.querySelector('.af-confirm-yes').disabled = true;
+          bar.querySelector('.af-confirm-yes').textContent = 'Deleting\u2026';
+          fetch('/audit/' + aid + '/pin?pinId=' + encodeURIComponent(pid), { method: 'DELETE', credentials: 'include' })
+            .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
+            .then(function(x) {
+              if (!x.res.ok) throw new Error(x.data.error || 'Failed');
+              if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+              hideTooltip();
+            })
+            .catch(function(e) {
+              bar.remove();
+              if (errEl) errEl.textContent = e.message || 'Failed';
+            });
+        };
       };
+    }
+
+    /* ── Edit pin handler ─────────────────────────────── */
+    var editBtn = document.getElementById('audit-pin-edit-btn');
+    if (editBtn) {
+      editBtn.onclick = function() {
+        cancelHideTooltip();
+        var bubble = document.getElementById('audit-pin-bubble');
+        if (!bubble) return;
+        var currentText = pin.feedback || '';
+        bubble.innerHTML = '<textarea id="audit-pin-edit-ta" class="af-edit-ta">' + escHtml(currentText) + '</textarea>' +
+          '<div class="af-edit-actions">' +
+          '<button type="button" class="af-edit-cancel" id="audit-pin-edit-cancel">Cancel</button>' +
+          '<button type="button" class="af-edit-save" id="audit-pin-edit-save">Save</button>' +
+          '</div>' +
+          '<span id="audit-pin-edit-err" class="af-err"></span>';
+        var editTa = document.getElementById('audit-pin-edit-ta');
+        if (editTa) { editTa.focus(); editTa.selectionStart = editTa.value.length; }
+        var cancelBtn = document.getElementById('audit-pin-edit-cancel');
+        var saveBtn = document.getElementById('audit-pin-edit-save');
+        if (cancelBtn) {
+          cancelBtn.onclick = function() {
+            bubble.innerHTML = escHtml(currentText);
+          };
+        }
+        if (saveBtn && editTa) {
+          editTa.onkeydown = function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveBtn.click(); }
+            if (e.key === 'Escape') { cancelBtn && cancelBtn.click(); }
+          };
+          saveBtn.onclick = function() {
+            var newText = editTa.value.trim();
+            if (!newText) return;
+            var errEl = document.getElementById('audit-pin-edit-err');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving…';
+            fetch('/audit/' + aid + '/edit-pin', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinId: pinId, feedback: newText }) })
+              .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
+              .then(function(x) {
+                if (!x.res.ok) throw new Error(x.data.error || 'Failed');
+                pin.feedback = newText;
+                bubble.innerHTML = escHtml(newText);
+                if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+              })
+              .catch(function(e) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+                if (errEl) errEl.textContent = e.message || 'Failed to save';
+              });
+          };
+        }
+      };
+    }
+
+    /* ── Reply edit + delete handlers ─────────────────── */
+    var replyEditBtns = tooltipEl.querySelectorAll('.af-reply-edit-btn');
+    var replyDeleteBtns = tooltipEl.querySelectorAll('.af-reply-delete-btn');
+
+    for (var ei = 0; ei < replyEditBtns.length; ei++) {
+      (function(btn) {
+        btn.onclick = function(e) {
+          e.stopPropagation();
+          cancelHideTooltip();
+          var rId = btn.getAttribute('data-reply-id');
+          var rIdx = parseInt(btn.getAttribute('data-reply-idx'), 10);
+          var bubble = document.getElementById('af-reply-bubble-' + rIdx);
+          if (!bubble || !rId) return;
+          var reply = replies[rIdx];
+          if (!reply) return;
+          var origText = reply.body || '';
+          bubble.innerHTML = '<textarea id="af-reply-edit-ta-' + rIdx + '" class="af-edit-ta" style="min-height:36px;">' + escHtml(origText) + '</textarea>' +
+            '<div class="af-edit-actions">' +
+            '<button type="button" class="af-edit-cancel" id="af-reply-edit-cancel-' + rIdx + '">Cancel</button>' +
+            '<button type="button" class="af-edit-save" id="af-reply-edit-save-' + rIdx + '">Save</button>' +
+            '</div>' +
+            '<span id="af-reply-edit-err-' + rIdx + '" class="af-err"></span>';
+          var rTa = document.getElementById('af-reply-edit-ta-' + rIdx);
+          if (rTa) { rTa.focus(); rTa.selectionStart = rTa.value.length; }
+          var rCancel = document.getElementById('af-reply-edit-cancel-' + rIdx);
+          var rSave = document.getElementById('af-reply-edit-save-' + rIdx);
+          if (rCancel) {
+            rCancel.onclick = function() { bubble.innerHTML = escHtml(origText); };
+          }
+          if (rSave && rTa) {
+            rTa.onkeydown = function(ke) {
+              if (ke.key === 'Enter' && !ke.shiftKey) { ke.preventDefault(); rSave.click(); }
+              if (ke.key === 'Escape') { rCancel && rCancel.click(); }
+            };
+            rSave.onclick = function() {
+              var newBody = rTa.value.trim();
+              if (!newBody) return;
+              var errEl = document.getElementById('af-reply-edit-err-' + rIdx);
+              rSave.disabled = true;
+              rSave.textContent = 'Saving\u2026';
+              fetch('/audit/' + aid + '/pin/reply/edit', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinId: pinId, replyId: rId, body: newBody }) })
+                .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
+                .then(function(x) {
+                  if (!x.res.ok) throw new Error(x.data.error || 'Failed');
+                  reply.body = newBody;
+                  bubble.innerHTML = escHtml(newBody);
+                  if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+                })
+                .catch(function(er) {
+                  rSave.disabled = false;
+                  rSave.textContent = 'Save';
+                  if (errEl) errEl.textContent = er.message || 'Failed';
+                });
+            };
+          }
+        };
+      })(replyEditBtns[ei]);
+    }
+
+    for (var di = 0; di < replyDeleteBtns.length; di++) {
+      (function(btn) {
+        btn.onclick = function(e) {
+          e.stopPropagation();
+          cancelHideTooltip();
+          var rId = btn.getAttribute('data-reply-id');
+          if (!rId) return;
+          var rIdx = parseInt(btn.getAttribute('data-reply-idx'), 10);
+          var msgEl = btn.closest('.af-reply-msg');
+          /* Toggle: if confirm bar already visible, remove it */
+          if (msgEl) {
+            var existing = msgEl.querySelector('.af-confirm-bar');
+            if (existing) { existing.remove(); return; }
+          }
+          /* Show inline confirm bar under the reply */
+          var bar = document.createElement('div');
+          bar.className = 'af-confirm-bar';
+          bar.style.padding = '4px 12px';
+          bar.style.borderRadius = '0 0 8px 8px';
+          bar.style.marginTop = '4px';
+          bar.innerHTML = '<span>Delete?</span><button type="button" class="af-confirm-no">No</button><button type="button" class="af-confirm-yes">Yes</button>';
+          if (msgEl) { msgEl.appendChild(bar); } else { tooltipEl.appendChild(bar); }
+          bar.querySelector('.af-confirm-no').onclick = function(ev) { ev.stopPropagation(); bar.remove(); };
+          bar.querySelector('.af-confirm-yes').onclick = function(ev) {
+            ev.stopPropagation();
+            bar.querySelector('.af-confirm-yes').disabled = true;
+            bar.querySelector('.af-confirm-yes').textContent = 'Deleting\u2026';
+            fetch('/audit/' + aid + '/pin/reply/edit?pinId=' + encodeURIComponent(pinId) + '&replyId=' + encodeURIComponent(rId), { method: 'DELETE', credentials: 'include' })
+              .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
+              .then(function(x) {
+                if (!x.res.ok) throw new Error(x.data.error || 'Failed');
+                if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+              })
+              .catch(function(er) {
+                bar.remove();
+                var errSpan = document.getElementById('audit-pin-delete-err');
+                if (errSpan) errSpan.textContent = er.message || 'Failed';
+              });
+          };
+        };
+      })(replyDeleteBtns[di]);
     }
 
     // Smart positioning: open above if enough room, otherwise open below
@@ -1274,6 +1495,10 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   window.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'SET_COMMENT_MODE') {
       var newVal = e.data.value;
+      // Don't let the parent turn off comment mode if the modifier key is
+      // physically held in this frame (e.g. parent blur fired because the
+      // iframe received focus while the user was already holding Ctrl).
+      if (!newVal && ctrlHeld) return;
       if (commentMode !== newVal) {
         commentMode = newVal;
         document.body.style.cursor = commentMode ? 'crosshair' : '';
