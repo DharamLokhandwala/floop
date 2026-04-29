@@ -24,16 +24,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMounted(true);
-    // Check localStorage for saved theme preference
-    const savedTheme = localStorage.getItem("theme") as Theme | null;
-    if (savedTheme && (savedTheme === "dark" || savedTheme === "light")) {
-      setTheme(savedTheme);
-      document.documentElement.className = savedTheme;
-    } else {
-      // Default to light mode
-      setTheme("light");
-      document.documentElement.className = "light";
-    }
+    // Force light mode for now
+    setTheme("light");
+    document.documentElement.className = "light";
+    localStorage.setItem("theme", "light");
   }, []);
 
   useEffect(() => {
@@ -44,7 +38,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme, mounted]);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+    // Disabled dark mode for now
+    // setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
 
   // Always provide context so useTheme() never throws (e.g. before hydration/mount).

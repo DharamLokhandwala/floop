@@ -56,6 +56,7 @@ export default async function AuditPage({ params, searchParams }: PageProps) {
         allowAnonymousComments={isRequestFeedback}
         linkCreated={false}
         isRequestFeedback={isRequestFeedback}
+        currentUserId={undefined}
       />
     );
   }
@@ -89,6 +90,7 @@ export default async function AuditPage({ params, searchParams }: PageProps) {
       isOwner={isOwner}
       linkCreated={linkCreated}
       isRequestFeedback={isRequestFeedback}
+      currentUserId={user.id}
     />
   );
 }

@@ -10,14 +10,17 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 
 const SUPPORT_EMAIL = "support@floop.design";
 
 export function DashboardNavActions() {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger aria-label="Open menu">
-        <MoreVertical className="size-4" />
+      <DropdownMenuTrigger asChild aria-label="Open menu">
+        <Button variant="outline" size="icon" className="size-9 bg-background">
+          <MoreVertical className="size-4" />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem asChild>

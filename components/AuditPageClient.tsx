@@ -70,6 +70,7 @@ interface AuditPageClientProps {
   allowAnonymousComments?: boolean;
   linkCreated?: boolean;
   isRequestFeedback?: boolean;
+  currentUserId?: string;
 }
 
 function buildAllPins(pins: Pin[], userPins: Pin[]): (Pin & { index: number })[] {
@@ -94,6 +95,7 @@ export function AuditPageClient({
   allowAnonymousComments = false,
   linkCreated = false,
   isRequestFeedback = false,
+  currentUserId,
 }: AuditPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -147,7 +149,12 @@ export function AuditPageClient({
     const handleKeyUp = (e: KeyboardEvent) => {
       if (isModifierKey(e)) setCommentMode(false);
     };
-    const handleBlur = () => setCommentMode(false);
+    // Don't reset comment mode when focus moves INTO the iframe — the iframe
+    // has its own Ctrl tracking and will send CTRL_KEY_STATE to sync back.
+    const handleBlur = () => {
+      if (document.activeElement?.tagName === "IFRAME") return;
+      setCommentMode(false);
+    };
 
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
@@ -334,6 +341,9 @@ export function AuditPageClient({
               collapsed={sidebarCollapsed}
               onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
               createdAt={createdAt}
+              currentUserId={currentUserId}
+              isOwner={isOwner}
+              auditId={auditId}
             />
           </div>
         </main>

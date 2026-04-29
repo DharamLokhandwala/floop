@@ -34,6 +34,10 @@ export interface Pin {
   docY?: number;
   /** Thread replies from signed-in viewers */
   replies?: PinReply[];
+  /** Optional author ID to allow the original user to edit their comment */
+  authorId?: string;
+  /** Optional author name */
+  authorName?: string;
 }
 
 export interface AuditData {

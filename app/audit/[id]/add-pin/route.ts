@@ -37,6 +37,7 @@ export async function POST(
       docX: body.docX,
       docY: body.docY,
       ...(body.audioUrl ? { audioUrl: body.audioUrl } : {}),
+      ...(user ? { authorId: user.id, authorName: user.name || user.email || undefined } : {}),
     };
 
     if (

@@ -55,11 +55,17 @@ export function AuditThumbnailCard({
       }}
     >
       <div className="relative aspect-video w-full bg-muted overflow-hidden">
-        <img
-          src={screenshotUrl}
-          alt=""
-          className="w-full h-full object-cover object-top"
-        />
+        {screenshotUrl ? (
+          <img
+            src={screenshotUrl}
+            alt=""
+            className="w-full h-full object-cover object-top"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-muted">
+            <span className="text-xs text-muted-foreground font-medium">Generating preview...</span>
+          </div>
+        )}
         {canEdit && onToggleSelect && (
           <div
             className={cn(

@@ -105,17 +105,25 @@ export function DashboardAuditView({
 
   const batchArchive = useCallback(async () => {
     await Promise.all(
-      Array.from(selectedIds).map((id) =>
-        fetch(`/audit/${id}/archive`, { method: "POST" })
-      )
+      Array.from(selectedIds).map(async (id) => {
+        const res = await fetch(`/audit/${id}/archive`, { method: "POST" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to archive");
+        }
+      })
     );
   }, [selectedIds]);
 
   const batchDelete = useCallback(async () => {
     await Promise.all(
-      Array.from(selectedIds).map((id) =>
-        fetch(`/audit/${id}/delete`, { method: "POST" })
-      )
+      Array.from(selectedIds).map(async (id) => {
+        const res = await fetch(`/audit/${id}/delete`, { method: "POST" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to delete");
+        }
+      })
     );
   }, [selectedIds]);
 
@@ -139,82 +147,46 @@ export function DashboardAuditView({
         }
       `}</style>
         <div key={tab} style={slideStyle}>
-          <div className="flex flex-col items-center justify-center w-full min-h-[600px] mt-6 rounded-3xl px-8 pt-16 pb-0 transition-all relative overflow-hidden" style={{ backgroundColor: "#F8F9FF" }}>
+          <div
+            className="flex flex-col items-center justify-center w-full mt-6 rounded-[2rem] pt-16 px-8 pb-0 transition-all relative overflow-hidden"
+            style={{ backgroundColor: "#F9FAFB" }}
+          >
+            {/* Custom dashed border with increased dash length */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="100%" height="100%" fill="none" rx="32" ry="32" stroke="#CBD2F6" strokeWidth="3" strokeDasharray="16, 12" />
+            </svg>
 
-            <FlowFieldBackground 
-            dashColor={"#E3E5FF"} dashThickness={0.6}
-            meshGradient={[
-              "radial-gradient(ellipse 80% 70% at 10% 10%, #3a3cff55 0%, transparent 60%)",
-              "radial-gradient(ellipse 70% 60% at 90% 5%,  #a78bfa66 0%, transparent 55%)",
-              "radial-gradient(ellipse 90% 70% at 55% 95%, #6366f155 0%, transparent 60%)",
-              "radial-gradient(ellipse 65% 55% at 0%  80%,  #818cf855 0%, transparent 50%)",
-              "radial-gradient(ellipse 55% 45% at 95% 60%, #4f46e544 0%, transparent 45%)",
-            ]}
-            noiseOpacity={0.3}
-            />
-
-
-            {/* <h2 className="text-xl md:text-2xl font-semibold tracking-tight text-foreground mb-3 font-display relative z-10">
-          {tab === "requested" ? "Request feedback" : "Given feedbacks"}
-        </h2>
-
-        <div className="max-w-xl text-center text-muted-foreground mb-8 text-sm md:text-base relative z-10">
-          {tab === "requested"
-            ? "Just the start of your zillion iterations."
-            : "You can view all the feedbacks you have given."}
-        </div> */}
-
-            <div className="relative z-10 w-full max-w-4xl mx-auto flex flex-col md:flex-row items-stretch justify-center gap-10 pb-12">
-              {tab === "requested" ? (
-                <>
-                  {/* Card 1 */}
-                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                    <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
-                    <h4 className="text-lg font-medium text-foreground mb-2">Got a site? Let's floop it</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Paste your URL and tell us what kind of feedback you're after.</p>
-                    <div className="mt-auto [&_button]:w-full">
-                      <CreateFloopLinkDropdown directAction="request" />
-                    </div>
-                  </div>
-                  {/* Card 2 */}
-                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                    <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
-                    <h4 className="text-lg font-medium text-foreground mb-2">Actually flooping it</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Send the link. No installs, no logins needed on their end.</p>
-                  </div>
-                  {/* Card 3 */}
-                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                    <div className="text-[11px] font-medium text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
-                    <h4 className="text-lg font-medium text-foreground mb-2">Checkout the feedback</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Feedback pinned to your site. You'll know what they're talking about instantly.</p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Card 1 */}
-                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                    <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 1</div>
-                    <h4 className="text-lg font-medium text-foreground mb-2">Create a floop link</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Create a floop link for the website you want to give feedback to.</p>
-                    <div className="mt-auto [&_button]:w-full">
-                      <CreateFloopLinkDropdown directAction="give" />
-                    </div>
-                  </div>
-                  {/* Card 2 */}
-                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                    <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 2</div>
-                    <h4 className="text-lg font-medium text-foreground mb-2">Give feedback</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">Click anywhere on the live website to pin comment at that particular location.</p>
-                  </div>
-                  {/* Card 3 */}
-                  <div className="flex-1 bg-white/80 dark:bg-white/80 backdrop-blur-xl rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-neutral-300 dark:border-white/20 flex flex-col text-left">
-                    <div className="text-[11px] font-semibold text-muted-foreground/70 tracking-wider mb-3 uppercase">Step 3</div>
-                    <h4 className="text-lg font-medium text-foreground mb-2">floop it</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed mb-6">floop the feedback by sharing the link with the person you pinned feedback for.</p>
-                  </div>
-                </>
-              )}
-            </div>
+            {tab === "requested" ? (
+              <>
+                <h2 className="text-[1.35rem] sm:text-2xl font-medium tracking-tight text-foreground mb-2 text-center">
+                  Request feedback on your website
+                </h2>
+                <p className="max-w-md text-center text-muted-foreground mb-6 text-sm sm:text-base leading-relaxed">
+                  Paste your URL and share it with anyone who you want to get feedback from.
+                </p>
+                <div className="mb-12 w-48 [&_button]:w-full">
+                  <CreateFloopLinkDropdown directAction="request" />
+                </div>
+                <div className="relative w-full max-w-4xl flex justify-center mt-auto">
+                  <img src="/emptyState-feedback-requested.svg" alt="Empty state for requesting feedback" className="w-full h-auto object-contain max-h-[400px]" />
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-[1.35rem] sm:text-[1.7rem] font-medium tracking-tight text-foreground mb-2 text-center">
+                  Create your first floop link to give feedback
+                </h2>
+                <p className="max-w-md text-center text-[#737373] mb-6 text-[0.95rem] leading-relaxed">
+                  Create a floop link and click anywhere on the live website to pin comment at that particular location.
+                </p>
+                <div className="mb-12 w-44 [&_button]:w-full [&_button]:rounded-lg">
+                  <CreateFloopLinkDropdown directAction="give" />
+                </div>
+                <div className="relative w-full max-w-4xl flex justify-center mt-auto">
+                  <img src="/emptyState-feedback-given.svg" alt="Empty state for giving feedback" className="w-full h-auto object-contain max-h-[400px]" />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </>

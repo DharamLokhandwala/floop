@@ -2,11 +2,13 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { captureScreenshot, captureHeroScreenshot, uploadScreenshotToBlob } from "@/lib/capture";
 import { createAudit, setShareVisibility, setReviewerName } from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 import { isValidUrl, normalizeUrl, validateGoal } from "@/lib/validation";
 import { v4 } from "uuid";
+import { prisma } from "@/lib/db";
 
 export type RunAuditState = {
   error?: string;
@@ -46,22 +48,33 @@ export async function runAudit(
   }
 
   try {
-    const buffer = await captureScreenshot(url, ignoreInsecure);
-    const screenshotUrl = await uploadScreenshotToBlob(buffer);
-    const pins: never[] = [];
-
     const id = v4();
     await createAudit({
       id,
       url,
       goal: goalTrimmed,
-      screenshotUrl,
-      pins,
+      screenshotUrl: "",
+      pins: [],
       createdById: user.id,
     });
     if (reviewerName) {
       await setReviewerName(id, user.id, reviewerName);
     }
+    
+    // Capture screenshot asynchronously so the user gets instantly redirected to the audit page
+    after(async () => {
+      try {
+        const buffer = await captureScreenshot(url, ignoreInsecure);
+        const screenshotUrl = await uploadScreenshotToBlob(buffer);
+        await prisma.audit.update({
+          where: { id },
+          data: { screenshotUrl },
+        });
+      } catch (err) {
+        console.error("Deferred background screenshot capture failed:", err);
+      }
+    });
+
     revalidatePath("/dashboard");
 
     redirect(`/audit/${id}`);
@@ -76,19 +89,6 @@ export async function runAudit(
 
     const message =
       err instanceof Error ? err.message : "An unexpected error occurred";
-
-    // Handle TLS/SSL certificate errors (e.g. net::ERR_CERT_DATE_INVALID)
-    // by asking the user if they want to proceed anyway.
-    const isCertError =
-      err instanceof Error && /ERR_CERT/i.test(err.message ?? "");
-
-    if (isCertError && !ignoreInsecure) {
-      return {
-        error:
-          "This website does not appear to be secure (its security certificate is invalid or expired). Do you still want to proceed and capture a screenshot anyway? If you do, click “Give feedback” again.",
-        insecureCertificate: true,
-      };
-    }
 
     return { error: message };
   }
@@ -129,40 +129,38 @@ export async function runRequestFeedbackLink(
   }
 
   try {
-    const buffer = await captureHeroScreenshot(url, ignoreInsecure);
-    const screenshotUrl = await uploadScreenshotToBlob(buffer);
     const id = v4();
     await createAudit({
       id,
       url,
       goal: goalTrimmed,
-      screenshotUrl,
+      screenshotUrl: "",
       pins: [],
       createdById: user.id,
       mode: "request_feedback",
     });
     await setShareVisibility(id, "public", user.id);
     await setReviewerName(id, user.id, reviewerName);
+    
+    // Capture hero screenshot asynchronously so the user instantly gets their share link
+    after(async () => {
+      try {
+        const buffer = await captureHeroScreenshot(url, ignoreInsecure);
+        const screenshotUrl = await uploadScreenshotToBlob(buffer);
+        await prisma.audit.update({
+          where: { id },
+          data: { screenshotUrl },
+        });
+      } catch (err) {
+        console.error("Deferred background hero screenshot capture failed:", err);
+      }
+    });
+
     revalidatePath("/dashboard");
     return { auditId: id };
   } catch (err) {
-    if (err && typeof err === "object" && "digest" in err) {
-      const digest = (err as { digest?: string }).digest;
-      if (digest?.startsWith("NEXT_REDIRECT")) {
-        throw err;
-      }
-    }
     const message =
       err instanceof Error ? err.message : "An unexpected error occurred";
-    const isCertError =
-      err instanceof Error && /ERR_CERT/i.test(err.message ?? "");
-    if (isCertError && !ignoreInsecure) {
-      return {
-        error:
-          "This website does not appear to be secure. Do you still want to proceed? Click Generate floop link again.",
-        insecureCertificate: true,
-      };
-    }
     return { error: message };
   }
 }

@@ -107,11 +107,17 @@ export function RequestedAuditRow({
         className="max-w-none w-auto p-0 rounded-lg overflow-hidden bg-background"
       >
         <div className="w-[320px] h-[180px] overflow-hidden rounded-lg border border-zinc-300 shadow-md">
-          <img
-            src={audit.screenshotUrl}
-            alt="Website hero"
-            className="w-full h-full object-cover object-top"
-          />
+          {audit.screenshotUrl ? (
+            <img
+              src={audit.screenshotUrl}
+              alt="Website hero"
+              className="w-full h-full object-cover object-top"
+            />
+          ) : (
+            <div className="w-full h-full bg-muted flex items-center justify-center">
+              <span className="text-xs text-muted-foreground font-medium">Generating preview...</span>
+            </div>
+          )}
         </div>
       </TooltipContent>
     </Tooltip>

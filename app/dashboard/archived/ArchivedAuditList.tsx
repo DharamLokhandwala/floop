@@ -41,17 +41,25 @@ export function ArchivedAuditList({ audits }: { audits: AuditListItem[] }) {
 
   const batchRestore = useCallback(async () => {
     await Promise.all(
-      Array.from(selectedIds).map((id) =>
-        fetch(`/audit/${id}/unarchive`, { method: "POST" })
-      )
+      Array.from(selectedIds).map(async (id) => {
+        const res = await fetch(`/audit/${id}/unarchive`, { method: "POST" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to restore");
+        }
+      })
     );
   }, [selectedIds]);
 
   const batchDelete = useCallback(async () => {
     await Promise.all(
-      Array.from(selectedIds).map((id) =>
-        fetch(`/audit/${id}/delete`, { method: "POST" })
-      )
+      Array.from(selectedIds).map(async (id) => {
+        const res = await fetch(`/audit/${id}/delete`, { method: "POST" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to delete");
+        }
+      })
     );
   }, [selectedIds]);
 

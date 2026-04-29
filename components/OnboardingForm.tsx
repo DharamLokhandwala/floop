@@ -39,7 +39,7 @@ export function OnboardingForm({
   const showMatchIndicator = confirm.length > 0;
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={formAction} className="space-y-6">
       {state?.error && (
         <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">
           {state.error}
@@ -129,18 +129,25 @@ export function OnboardingForm({
         </div>
         {showMatchIndicator && (
           <p
-            className={`text-xs transition-colors duration-150 ${
-              passwordsMatch ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+            className={`text-xs font-medium transition-colors duration-150 flex items-center gap-1.5 mt-1.5 ${
+              passwordsMatch ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"
             }`}
           >
-            {passwordsMatch ? "Passwords match" : "Passwords do not match yet"}
+            {passwordsMatch ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Passwords match
+              </>
+            ) : "Passwords do not match yet"}
           </p>
         )}
       </div>
 
-      <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Setting up…" : "Get started"}
-      </Button>
+      <div className="pt-4">
+        <Button type="submit" className="w-full" disabled={isPending}>
+          {isPending ? "Setting up…" : "Get started"}
+        </Button>
+      </div>
     </form>
   );
 }

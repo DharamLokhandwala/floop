@@ -82,6 +82,98 @@ export async function deletePinById(auditId: string, pinId: string): Promise<voi
   }
 }
 
+export async function updatePinFeedback(
+  auditId: string,
+  pinId: string,
+  newFeedback: string
+): Promise<Pin> {
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  if (!audit) throw new Error("Audit not found");
+  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
+  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
+  const loc = findPinLocation(aiPins, userPins, pinId);
+  if (!loc) throw new Error("Pin not found");
+  
+  if (loc.bucket === "pins") {
+    const next = [...aiPins];
+    next[loc.index] = { ...next[loc.index], feedback: newFeedback };
+    await prisma.audit.update({
+      where: { id: auditId },
+      data: { pinsJson: JSON.stringify(next) },
+    });
+    return next[loc.index];
+  } else {
+    const next = [...userPins];
+    next[loc.index] = { ...next[loc.index], feedback: newFeedback };
+    await prisma.audit.update({
+      where: { id: auditId },
+      data: { userPinsJson: JSON.stringify(next) },
+    });
+    return next[loc.index];
+  }
+}
+
+export async function updatePinReply(
+  auditId: string,
+  pinId: string,
+  replyId: string,
+  newBody: string
+): Promise<void> {
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  if (!audit) throw new Error("Audit not found");
+  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
+  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
+  const loc = findPinLocation(aiPins, userPins, pinId);
+  if (!loc) throw new Error("Pin not found");
+
+  const bucket = loc.bucket === "pins" ? aiPins : userPins;
+  const next = [...bucket];
+  const pin = { ...next[loc.index] };
+  const replies = [...(pin.replies ?? [])];
+  const ri = replies.findIndex((r) => r.id === replyId);
+  if (ri < 0) throw new Error("Reply not found");
+  replies[ri] = { ...replies[ri], body: newBody };
+  pin.replies = replies;
+  next[loc.index] = pin;
+
+  await prisma.audit.update({
+    where: { id: auditId },
+    data: loc.bucket === "pins"
+      ? { pinsJson: JSON.stringify(next) }
+      : { userPinsJson: JSON.stringify(next) },
+  });
+}
+
+export async function deletePinReply(
+  auditId: string,
+  pinId: string,
+  replyId: string
+): Promise<void> {
+  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  if (!audit) throw new Error("Audit not found");
+  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
+  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
+  const loc = findPinLocation(aiPins, userPins, pinId);
+  if (!loc) throw new Error("Pin not found");
+
+  const bucket = loc.bucket === "pins" ? aiPins : userPins;
+  const next = [...bucket];
+  const pin = { ...next[loc.index] };
+  const replies = [...(pin.replies ?? [])];
+  const ri = replies.findIndex((r) => r.id === replyId);
+  if (ri < 0) throw new Error("Reply not found");
+  replies.splice(ri, 1);
+  pin.replies = replies;
+  next[loc.index] = pin;
+
+  await prisma.audit.update({
+    where: { id: auditId },
+    data: loc.bucket === "pins"
+      ? { pinsJson: JSON.stringify(next) }
+      : { userPinsJson: JSON.stringify(next) },
+  });
+}
+
 /** Used when reading createdById/shareVisibility/mode so code works even if Prisma client types omit them (e.g. on Vercel). */
 type AuditOwnerFields = { createdById?: string | null; shareVisibility?: string | null; mode?: string | null };
 
