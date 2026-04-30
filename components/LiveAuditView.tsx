@@ -53,6 +53,8 @@ interface LiveAuditViewProps {
   initialPath?: string;
   /** Pin to highlight on hover (persistent outline, no scroll, no tooltip) */
   hoverHighlightPin?: Pin | null;
+  /** Called whenever the iframe navigates to a new page path */
+  onPageChange?: (path: string) => void;
 }
 
 export function LiveAuditView({
@@ -69,6 +71,7 @@ export function LiveAuditView({
   onPinSaved,
   initialPath = "",
   hoverHighlightPin = null,
+  onPageChange,
 }: LiveAuditViewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [pendingClick, setPendingClick] = useState<PendingLiveClick | null>(null);
@@ -197,8 +200,10 @@ export function LiveAuditView({
           const p = u.pathname + u.search;
           const normalized = !p || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
           setCurrentPagePath(normalized);
+          onPageChange?.(normalized);
         } catch {
           setCurrentPagePath("/");
+          onPageChange?.("/");
         }
       }
       if (e.data?.type === "CTRL_KEY_STATE") {
@@ -210,7 +215,7 @@ export function LiveAuditView({
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onCommentModeChange, onPinSaved]);
+  }, [onCommentModeChange, onPinSaved, onPageChange]);
 
   // When parent asks to highlight a pin: navigate iframe if needed, then send HIGHLIGHT
   useEffect(() => {

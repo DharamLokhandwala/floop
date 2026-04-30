@@ -111,6 +111,13 @@ export function AuditPageClient({
   const [hoveredPinIndex, setHoveredPinIndex] = useState<number | null>(null);
   const [commentMode, setCommentMode] = useState(false);
   const [isMac, setIsMac] = useState(false);
+  const [currentIframePath, setCurrentIframePath] = useState<string>(initialPath ? (initialPath === "/" ? "/" : initialPath.replace(/\/$/, "") || "/") : "/");
+
+  const handlePageChange = useCallback((path: string) => {
+    setCurrentIframePath(path);
+    setSelectedPinIndex(null);
+    setHoveredPinIndex(null);
+  }, []);
   const scrambledText = useTextScramble("Comment mode active", commentMode);
   const didAutoCopy = useRef(false);
 
@@ -167,6 +174,7 @@ export function AuditPageClient({
   }, [isMac]);
 
   const allPins = useMemo(() => buildAllPins(pins, userPins), [pins, userPins]);
+
   const highlightPin =
     selectedPinIndex != null && allPins[selectedPinIndex]
       ? allPins[selectedPinIndex]
@@ -327,6 +335,7 @@ export function AuditPageClient({
               onPinSaved={() => router.refresh()}
               initialPath={initialPath}
               hoverHighlightPin={hoverHighlightPin}
+              onPageChange={handlePageChange}
             />
           </div>
           <div className="w-full lg:w-auto shrink-0 border-t lg:border-t-0 lg:border-l border-border">

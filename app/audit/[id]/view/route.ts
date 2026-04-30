@@ -1466,6 +1466,45 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderHotspots);
   else renderHotspots();
 
+  /* ── Clear hotspots immediately on SPA navigation ────────────────────────
+   * When a SPA navigates (pushState / replaceState / popstate) the DOM doesn't
+   * reload, so the old page's hotspot elements stay visible until UPDATE_PINS
+   * arrives from the parent.  We wrap the history methods here (after the
+   * history-shim has already wrapped them) so that cleanupHotspots() fires
+   * synchronously the moment the pathname changes.  We compare pathnames so
+   * that replaceState calls that only update a query-param or hash (common
+   * during initial load) don't trigger a spurious cleanup.
+   * The parent's UPDATE_PINS message will re-render the correct pins shortly
+   * after it receives the AUDIT_VIEWER_READY notification from the shim.    */
+  (function() {
+    var _hp = history.pushState;
+    var _hr = history.replaceState;
+    function cleanIfPathChanged(prevPath) {
+      var nowPath = window.location.pathname;
+      if (nowPath !== prevPath) {
+        cleanupHotspots();
+        if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pins = [];
+      }
+    }
+    history.pushState = function() {
+      var prev = window.location.pathname;
+      var result = _hp.apply(this, arguments);
+      cleanIfPathChanged(prev);
+      return result;
+    };
+    history.replaceState = function() {
+      var prev = window.location.pathname;
+      var result = _hr.apply(this, arguments);
+      cleanIfPathChanged(prev);
+      return result;
+    };
+    window.addEventListener('popstate', function() {
+      /* For popstate the URL has already changed by the time the event fires */
+      cleanupHotspots();
+      if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pins = [];
+    });
+  })();
+
   function getSelector(el) {
     if (!el || el === document.body || el === document.documentElement) return null;
     if (el.id === 'audit-comment-hover-overlay' || el.id === 'audit-viewer-hotspots' || el.id === 'audit-viewer-tooltip' || el.classList.contains('audit-viewer-hotspot')) return null;
