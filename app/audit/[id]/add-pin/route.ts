@@ -11,42 +11,40 @@ function normalizePath(pathname: string, search = "", hash = ""): string {
   return p === "" || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
 }
 
-function normalizePinPageUrl(
-  pageUrl: unknown,
-  auditUrl: string
-): string {
+function normalizePinPageUrl(pageUrl: unknown, auditUrl: string): string {
   const origin = new URL(auditUrl).origin;
-  const looksLikeProxyPath = (pathname: string) =>
-    /\/audit\/[^/]+\/view$/i.test(pathname);
 
-  const toPath = (input: string): string => {
-    const parsed = new URL(input, "http://_");
-    const pathParam = parsed.searchParams.get("path");
-    if (pathParam && looksLikeProxyPath(parsed.pathname)) {
-      const proxied = new URL(pathParam, "http://_");
-      return normalizePath(proxied.pathname, proxied.search, proxied.hash);
+  // Only unwrap ?path= when the URL is exactly the proxy view route.
+  const isProxyViewUrl = (pathname: string) =>
+    /\/audit\/[^/]+\/view\/?$/i.test(pathname);
+
+  const extractPath = (u: URL): string => {
+    if (isProxyViewUrl(u.pathname)) {
+      const p = u.searchParams.get("path");
+      if (p) {
+        try {
+          const inner = new URL(p, "http://_");
+          return normalizePath(inner.pathname, inner.search, inner.hash);
+        } catch { return "/"; }
+      }
+      return "/";
     }
-    return normalizePath(parsed.pathname, parsed.search, parsed.hash);
+    return normalizePath(u.pathname, u.search, u.hash);
   };
 
-  if (typeof pageUrl !== "string" || pageUrl.trim() === "") {
+  if (typeof pageUrl !== "string" || !pageUrl.trim()) {
     return `${origin}/`;
   }
 
   try {
-    const absolute = new URL(pageUrl);
-    const path = looksLikeProxyPath(absolute.pathname) && absolute.searchParams.get("path")
-      ? toPath(absolute.searchParams.get("path")!)
-      : normalizePath(absolute.pathname, absolute.search, absolute.hash);
+    const path = extractPath(new URL(pageUrl));
     return new URL(path, origin).toString();
-  } catch {
-    try {
-      const path = toPath(pageUrl);
-      return new URL(path, origin).toString();
-    } catch {
-      return `${origin}/`;
-    }
-  }
+  } catch { /* fall through */ }
+  try {
+    const path = extractPath(new URL(pageUrl, origin));
+    return new URL(path, origin).toString();
+  } catch { /* fall through */ }
+  return `${origin}/`;
 }
 
 export async function POST(
@@ -86,6 +84,12 @@ export async function POST(
       ...(body.audioUrl ? { audioUrl: body.audioUrl } : {}),
       ...(user ? { authorId: user.id, authorName: user.name || user.email || undefined } : {}),
     };
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[pins] add-pin mapping", {
+        incomingPageUrl: body.pageUrl,
+        normalizedPageUrl: pin.pageUrl,
+      });
+    }
 
     if (
       typeof pin.x !== "number" ||

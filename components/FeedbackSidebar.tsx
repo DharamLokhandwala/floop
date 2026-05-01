@@ -37,15 +37,24 @@ function buildAllPins(pins: Pin[], userPins: Pin[]): PinWithIndex[] {
 
 function getPinDisplayPath(pageUrl?: string): string {
   if (!pageUrl) return "/index";
+  const looksLikeProxyPath = (pathname: string) =>
+    /\/audit\/[^/]+(?:\/view)?\/?$/i.test(pathname);
 
   const normalize = (pathname: string, hash = "") => {
     const base = !pathname || pathname === "/" ? "/index" : pathname.replace(/\/$/, "") || "/index";
     return hash ? `${base}${hash}` : base;
   };
 
+  // Framer SPA navigation stores asset proxy URLs (e.g. /audit/{id}/asset/about).
+  // Extract the canonical path from after /asset/.
+  const assetProxyPath = (pathname: string): string | null => {
+    const m = pathname.match(/\/audit\/[^/]+\/asset(\/.*)/i);
+    return m ? m[1] || "/" : null;
+  };
+
   const fromUrl = (u: URL) => {
     const pathParam = u.searchParams.get("path");
-    if (pathParam) {
+    if (pathParam && looksLikeProxyPath(u.pathname || "")) {
       try {
         const parsed = new URL(pathParam, "http://_");
         return normalize(parsed.pathname, parsed.hash);
@@ -53,6 +62,8 @@ function getPinDisplayPath(pageUrl?: string): string {
         return "/index";
       }
     }
+    const assetPath = assetProxyPath(u.pathname || "");
+    if (assetPath !== null) return normalize(assetPath);
     return normalize(u.pathname || "/", u.hash || "");
   };
 
@@ -150,6 +161,7 @@ function EditablePinCard({
   };
 
   const pagePath = getPinDisplayPath(pin.pageUrl);
+
 
   if (editing) {
     return (

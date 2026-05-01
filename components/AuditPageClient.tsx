@@ -39,13 +39,15 @@ function useTextScramble(text: string, active: boolean, duration = 350) {
 
 function getPagePath(pin: Pin): string {
   if (!pin.pageUrl) return "/";
+  const looksLikeProxyPath = (pathname: string) =>
+    /\/audit\/[^/]+(?:\/view)?\/?$/i.test(pathname);
   const normalize = (pathname: string, search = "", hash = "") => {
     const p = `${pathname}${search}${hash}`;
     return p === "" || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
   };
   const fromUrl = (u: URL) => {
     const pathParam = u.searchParams.get("path");
-    if (pathParam) {
+    if (pathParam && looksLikeProxyPath(u.pathname || "")) {
       try {
         const p = new URL(pathParam, "http://_");
         return normalize(p.pathname, p.search, p.hash);
@@ -139,10 +141,23 @@ export function AuditPageClient({
   const [currentIframePath, setCurrentIframePath] = useState<string>(initialPath ? (initialPath === "/" ? "/" : initialPath.replace(/\/$/, "") || "/") : "/");
 
   const handlePageChange = useCallback((path: string) => {
-    setCurrentIframePath(path);
+    const normalized =
+      path === "/" ? "/" : path.replace(/\/$/, "") || "/";
+    setCurrentIframePath(normalized);
     setSelectedPinIndex(null);
     setHoveredPinIndex(null);
-  }, []);
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (normalized === "/") params.delete("path");
+    else params.set("path", normalized);
+    const nextQuery = params.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      router.replace(`/audit/${auditId}${nextQuery ? `?${nextQuery}` : ""}`, {
+        scroll: false,
+      });
+    }
+  }, [auditId, router, searchParams]);
   const scrambledText = useTextScramble("Comment mode active", commentMode);
   const didAutoCopy = useRef(false);
 

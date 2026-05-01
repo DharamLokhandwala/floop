@@ -301,7 +301,7 @@ export function InlineCommentInput({
           background: "var(--color-floop-blue, #3A3CFF)",
           border: "2px solid #fff",
           transform: "translate(-50%, -50%)",
-          zIndex: 2147483645,
+          zIndex: 2147483646,
           boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
           animation: "pin-drop 0.25s ease-out",
           pointerEvents: "none",
@@ -316,7 +316,7 @@ export function InlineCommentInput({
           left,
           top,
           width: CARD_WIDTH,
-          zIndex: 2147483646,
+          zIndex: 2147483647,
           animation: "comment-pop 0.2s ease-out",
         }}
       >

@@ -12,28 +12,24 @@ function normalizePath(pathname: string, search = ""): string {
 function getPinPath(pageUrl: string | undefined, auditOrigin: string): string {
   if (!pageUrl) return "/";
 
+  // Only unwrap ?path= when the URL is exactly the proxy view route.
+  const isProxyViewUrl = (pathname: string) =>
+    /\/audit\/[^/]+\/view\/?$/i.test(pathname);
+
   const fromUrl = (u: URL) => {
-    const pathParam = u.searchParams.get("path");
-    if (pathParam) {
-      try {
-        const p = new URL(pathParam, auditOrigin);
-        return normalizePath(p.pathname, p.search);
-      } catch {
-        return "/";
+    if (isProxyViewUrl(u.pathname)) {
+      const p = u.searchParams.get("path");
+      if (p) {
+        try { return normalizePath(new URL(p, auditOrigin).pathname, new URL(p, auditOrigin).search); } catch { return "/"; }
       }
+      return "/";
     }
     return normalizePath(u.pathname, u.search);
   };
 
-  try {
-    return fromUrl(new URL(pageUrl));
-  } catch {
-    try {
-      return fromUrl(new URL(pageUrl, auditOrigin));
-    } catch {
-      return "/";
-    }
-  }
+  try { return fromUrl(new URL(pageUrl)); } catch { /* fall through */ }
+  try { return fromUrl(new URL(pageUrl, auditOrigin)); } catch { /* fall through */ }
+  return "/";
 }
 
 function escapeHtml(input: string): string {
@@ -476,7 +472,7 @@ function getHistoryShimScript(
       try { parsed = new URL(String(url)); } catch(e2) { parsed = new URL(String(url), window.location.origin); }
       var pathParam = parsed.searchParams ? parsed.searchParams.get('path') : null;
       var pageUrl;
-      if (pathParam && /\/audit\/[^/]+\/view$/i.test(parsed.pathname || '')) {
+      if (pathParam && /\/audit\/[^/]+(?:\/view)?\/?$/i.test(parsed.pathname || '')) {
         var purl = new URL(pathParam, origin);
         pageUrl = origin + purl.pathname + (purl.search || '') + (purl.hash || '');
       } else if (parsed.origin === origin) {
@@ -584,7 +580,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     if (hoverOverlay) return;
     hoverOverlay = document.createElement('div');
     hoverOverlay.id = 'audit-comment-hover-overlay';
-    hoverOverlay.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #3A3CFF;border-radius:4px;background:rgba(58,60,255,0.08);transition:left 0.08s ease-out,top 0.08s ease-out,width 0.08s ease-out,height 0.08s ease-out;display:none;';
+    hoverOverlay.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483645;border:2px solid #3A3CFF;border-radius:4px;background:rgba(58,60,255,0.08);transition:left 0.08s ease-out,top 0.08s ease-out,width 0.08s ease-out,height 0.08s ease-out;display:none;';
     document.documentElement.appendChild(hoverOverlay);
   }
 
@@ -897,7 +893,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     tooltipEl = document.createElement('div');
     tooltipEl.id = 'audit-viewer-tooltip';
     tooltipEl.className = 'audit-figma-root';
-    tooltipEl.style.cssText = 'position:fixed;left:0;top:0;display:none;z-index:2147483648;pointer-events:auto;';
+    tooltipEl.style.cssText = 'position:fixed;left:0;top:0;display:none;z-index:2147483647;pointer-events:auto;';
     
     tooltipEl.addEventListener('mouseenter', cancelHideTooltip);
     tooltipEl.addEventListener('mouseleave', function() { scheduleHideTooltip(); });
@@ -1544,7 +1540,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     if (!styleEl) {
       styleEl = document.createElement('style');
       styleEl.id = 'audit-viewer-hotspot-styles';
-      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{box-shadow:0 2px 8px rgba(0,0,0,0.18),0 0 0 2px #fff}50%{box-shadow:0 4px 16px rgba(0,0,0,0.22),0 0 0 3px rgba(255,255,255,0.9)}}@keyframes audit-tooltip-in{from{opacity:0;transform:translate(-50%,-100%) scale(0.95) translateY(4px)}to{opacity:1;transform:translate(-50%,-100%) scale(1) translateY(0)}}.audit-viewer-hotspot{display:flex !important;align-items:center;justify-content:center;width:26px !important;height:26px !important;min-width:26px !important;min-height:26px !important;animation:audit-hotspot-pulse 2.5s ease-in-out infinite !important;opacity:1 !important;visibility:visible !important;transition:transform 0.15s ease-out,box-shadow 0.15s ease-out !important;font-size:11px;font-weight:700;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1;user-select:none}.audit-viewer-hotspot:hover{transform:translate(-50%,-100%) scale(1.3) !important;box-shadow:0 4px 20px rgba(0,0,0,0.3),0 0 0 3px #fff !important;z-index:2147483645 !important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none !important;}html,body{-ms-overflow-style:none !important;scrollbar-width:none !important;}';
+      styleEl.textContent = '@keyframes audit-hotspot-pulse{0%,100%{box-shadow:0 2px 8px rgba(0,0,0,0.18),0 0 0 2px #fff}50%{box-shadow:0 4px 16px rgba(0,0,0,0.22),0 0 0 3px rgba(255,255,255,0.9)}}@keyframes audit-tooltip-in{from{opacity:0;transform:translate(-50%,-100%) scale(0.95) translateY(4px)}to{opacity:1;transform:translate(-50%,-100%) scale(1) translateY(0)}}.audit-viewer-hotspot{display:flex !important;align-items:center;justify-content:center;width:26px !important;height:26px !important;min-width:26px !important;min-height:26px !important;animation:audit-hotspot-pulse 2.5s ease-in-out infinite !important;opacity:1 !important;visibility:visible !important;transition:transform 0.15s ease-out,box-shadow 0.15s ease-out !important;font-size:11px;font-weight:700;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1;user-select:none;z-index:2147483646 !important}.audit-viewer-hotspot:hover{transform:translate(-50%,-100%) scale(1.3) !important;box-shadow:0 4px 20px rgba(0,0,0,0.3),0 0 0 3px #fff !important;z-index:2147483646 !important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none !important;}html,body{-ms-overflow-style:none !important;scrollbar-width:none !important;}';
       document.head.appendChild(styleEl);
     }
     ensureTooltip();
@@ -1558,7 +1554,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       el.className = 'audit-viewer-hotspot';
       el.setAttribute('data-pin-index', String(i));
       // position:fixed so it respects viewport coordinates
-      el.style.cssText = 'display:flex !important;align-items:center;justify-content:center;position:fixed;left:' + pos.vx + 'px;top:' + pos.vy + 'px;transform:translate(-50%,-100%);width:26px !important;height:26px !important;border-radius:50%;background:' + (categoryColors[pin.category] || '#3A3CFF') + ' !important;border:2px solid #fff;cursor:pointer;z-index:2147483640;';
+      el.style.cssText = 'display:flex !important;align-items:center;justify-content:center;position:fixed;left:' + pos.vx + 'px;top:' + pos.vy + 'px;transform:translate(-50%,-100%);width:26px !important;height:26px !important;border-radius:50%;background:' + (categoryColors[pin.category] || '#3A3CFF') + ' !important;border:2px solid #fff;cursor:pointer;z-index:2147483646;';
       el.textContent = String(i + 1);
       el.setAttribute('data-feedback', pin.feedback || '');
       el.setAttribute('data-category', pin.category || '');
@@ -1732,8 +1728,20 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     }
   });
 
+  function isEditableTarget(el) {
+    if (!el || !el.closest) return false;
+    return !!el.closest('#audit-viewer-tooltip');
+  }
+
   document.addEventListener('click', function(e) {
-    if (!commentMode) return;
+    var originalTarget = e.target;
+    if (isEditableTarget(originalTarget)) return;
+    // Recover from occasional comment-mode desync after thread mutations
+    // (e.g. delete): if modifier is currently held, treat this click as comment
+    // capture even if local commentMode boolean has gone stale.
+    var modHeldNow = isModifierHeld(e);
+    if (!commentMode && modHeldNow) setCommentModeFromKey(true);
+    if (!commentMode && !modHeldNow) return;
     e.preventDefault();
     e.stopPropagation();
     var target = lastHoveredEl || e.target;
@@ -1765,7 +1773,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   }, true);
 
   if (window.parent !== window) {
-    var pageUrl = window.location.href;
+    var pageUrl = (window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl) || window.location.href;
     if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pageUrl = pageUrl;
     window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
     
