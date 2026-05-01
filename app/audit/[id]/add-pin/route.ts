@@ -6,14 +6,61 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import type { Pin } from "@/types/audit";
 
+function normalizePath(pathname: string, search = "", hash = ""): string {
+  const p = `${pathname}${search}${hash}`;
+  return p === "" || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
+}
+
+function normalizePinPageUrl(
+  pageUrl: unknown,
+  auditUrl: string
+): string {
+  const origin = new URL(auditUrl).origin;
+  const looksLikeProxyPath = (pathname: string) =>
+    /\/audit\/[^/]+\/view$/i.test(pathname);
+
+  const toPath = (input: string): string => {
+    const parsed = new URL(input, "http://_");
+    const pathParam = parsed.searchParams.get("path");
+    if (pathParam && looksLikeProxyPath(parsed.pathname)) {
+      const proxied = new URL(pathParam, "http://_");
+      return normalizePath(proxied.pathname, proxied.search, proxied.hash);
+    }
+    return normalizePath(parsed.pathname, parsed.search, parsed.hash);
+  };
+
+  if (typeof pageUrl !== "string" || pageUrl.trim() === "") {
+    return `${origin}/`;
+  }
+
+  try {
+    const absolute = new URL(pageUrl);
+    const path = looksLikeProxyPath(absolute.pathname) && absolute.searchParams.get("path")
+      ? toPath(absolute.searchParams.get("path")!)
+      : normalizePath(absolute.pathname, absolute.search, absolute.hash);
+    return new URL(path, origin).toString();
+  } catch {
+    try {
+      const path = toPath(pageUrl);
+      return new URL(path, origin).toString();
+    } catch {
+      return `${origin}/`;
+    }
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const rows = await prisma.$queryRaw<[{ mode: string | null }]>`
-    SELECT mode FROM Audit WHERE id = ${id}
+  const rows = await prisma.$queryRaw<[{ mode: string | null; url: string | null }]>`
+    SELECT mode, url FROM Audit WHERE id = ${id}
   `;
+  const auditUrl = rows[0]?.url;
+  if (!auditUrl) {
+    return NextResponse.json({ error: "Audit not found" }, { status: 404 });
+  }
   const allowAnonymous = rows[0]?.mode === "request_feedback";
   const user = await getCurrentUser();
   if (!allowAnonymous && !user) {
@@ -28,7 +75,7 @@ export async function POST(
       y: body.y,
       category: body.category ?? "Feedback",
       feedback: body.feedback,
-      pageUrl: body.pageUrl,
+      pageUrl: normalizePinPageUrl(body.pageUrl, auditUrl),
       selector: body.selector,
       viewportWidth: body.viewportWidth,
       viewportHeight: body.viewportHeight,

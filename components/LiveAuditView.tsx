@@ -4,20 +4,56 @@ import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { InlineCommentInput, type PendingLiveClick } from "@/components/InlineCommentInput";
 import type { Pin } from "@/types/audit";
 
-/** Normalize pin's page to path (pathname + search) for comparison with iframe path */
-function getPinPath(pin: Pin): string {
-  if (!pin.pageUrl) return "/";
+function normalizePath(pathname: string, search: string = "", hash: string = ""): string {
+  const p = `${pathname}${search || ""}${hash || ""}`;
+  return p === "" || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
+}
+
+function getPagePathFromUrlLike(
+  pageUrl: string | undefined,
+  auditUrl?: string
+): string {
+  if (!pageUrl) return "/";
+
+  const fromPathLike = (value: string) => {
+    try {
+      const u = new URL(value, "http://_");
+      return normalizePath(u.pathname, u.search, u.hash);
+    } catch {
+      return "/";
+    }
+  };
+
+  const fromUrl = (u: URL) => {
+    const pathParam = u.searchParams.get("path");
+    if (pathParam && /\/audit\/[^/]+\/view$/i.test(u.pathname)) {
+      return fromPathLike(pathParam);
+    }
+    return normalizePath(u.pathname, u.search, u.hash);
+  };
+
   try {
-    const u = new URL(pin.pageUrl);
-    const p = u.pathname + u.search;
-    return p === "" ? "/" : p.replace(/\/$/, "") || "/";
+    return fromUrl(new URL(pageUrl));
   } catch {
-    return "/";
+    try {
+      return fromUrl(new URL(pageUrl, "http://_"));
+    } catch {
+      if (auditUrl) {
+        try {
+          return fromUrl(new URL(pageUrl, auditUrl));
+        } catch {
+          return "/";
+        }
+      }
+      return "/";
+    }
   }
 }
 
 function pinsMatch(a: Pin, b: Pin): boolean {
-  if (a.pageUrl !== b.pageUrl) return false;
+  if (getPagePathFromUrlLike(a.pageUrl) !== getPagePathFromUrlLike(b.pageUrl)) {
+    return false;
+  }
   if (typeof a.docX === "number" && typeof b.docX === "number" && typeof a.docY === "number" && typeof b.docY === "number") {
     return Math.abs(a.docX - b.docX) < 2 && Math.abs(a.docY - b.docY) < 2;
   }
@@ -80,6 +116,8 @@ export function LiveAuditView({
   const [iframeSrcPath, setIframeSrcPath] = useState(initialPath);
   const [currentPagePath, setCurrentPagePath] = useState(initialPath);
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [viewerError, setViewerError] = useState<{ status?: number; title?: string; message?: string } | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [optimisticPins, setOptimisticPins] = useState<Pin[]>([]);
   const pendingHighlightRef = useRef<Pin | null>(null);
   const pendingHighlightIndexRef = useRef<number | null>(null);
@@ -89,25 +127,25 @@ export function LiveAuditView({
   const [clientHeight, setClientHeight] = useState(0);
 
   const currentPath = useMemo(() => {
-    const p = currentPagePath || "/";
-    const normalized = p === "/" ? "/" : p.replace(/\/$/, "") || "/";
-    return normalized;
+    return normalizePath(currentPagePath || "/");
   }, [currentPagePath]);
   const pinsForCurrentPage = useMemo(() => {
     const all = [...pins, ...userPins];
-    return all.filter((pin) => getPinPath(pin) === currentPath);
-  }, [pins, userPins, currentPath]);
+    return all.filter((pin) => getPagePathFromUrlLike(pin.pageUrl, auditUrl) === currentPath);
+  }, [pins, userPins, currentPath, auditUrl]);
 
   // Merge server pins with optimistic pins (just-saved, not yet in server response)
   const pinsForHotspots = useMemo(() => {
     const fromServer = pinsForCurrentPage;
-    const optimisticOnPage = optimisticPins.filter((p) => getPinPath(p) === currentPath);
+    const optimisticOnPage = optimisticPins.filter(
+      (p) => getPagePathFromUrlLike(p.pageUrl, auditUrl) === currentPath
+    );
     const merged = [...fromServer];
     for (const opt of optimisticOnPage) {
       if (!merged.some((s) => pinsMatch(s, opt))) merged.push(opt);
     }
     return merged;
-  }, [pinsForCurrentPage, optimisticPins, currentPath]);
+  }, [pinsForCurrentPage, optimisticPins, currentPath, auditUrl]);
 
   const postToIframe = useCallback(
     (data: unknown) => {
@@ -195,15 +233,32 @@ export function LiveAuditView({
         setClientHeight(prev => prev !== clientHeight ? clientHeight : prev);
       }
       if (e.data?.type === "AUDIT_VIEWER_READY") {
-        try {
-          const u = new URL(e.data.pageUrl || "", "http://_");
-          const p = u.pathname + u.search;
-          const normalized = !p || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
-          setCurrentPagePath(normalized);
-          onPageChange?.(normalized);
-        } catch {
-          setCurrentPagePath("/");
-          onPageChange?.("/");
+        setViewerError(null);
+        const normalized = getPagePathFromUrlLike(e.data.pageUrl, auditUrl);
+        setCurrentPagePath(normalized);
+        onPageChange?.(normalized);
+
+        // If we're waiting to navigate+highlight from sidebar, do it only after
+        // the destination page reports it's ready. This avoids race conditions
+        // where postMessage is sent before the iframe listener is attached.
+        const pendingPin = pendingHighlightRef.current;
+        if (pendingPin) {
+          const pendingPath = getPagePathFromUrlLike(pendingPin.pageUrl, auditUrl);
+          if (pendingPath === normalized) {
+            pendingHighlightRef.current = null;
+            const pinIndexInPage = pendingHighlightIndexRef.current;
+            pendingHighlightIndexRef.current = null;
+            postToIframe({
+              type: "HIGHLIGHT",
+              selector: pendingPin.selector || null,
+              x: pendingPin.x,
+              y: pendingPin.y,
+            });
+            if (typeof pinIndexInPage === "number") {
+              postToIframe({ type: "SHOW_TOOLTIP", pinIndex: pinIndexInPage });
+            }
+            onHighlightDone?.();
+          }
         }
       }
       if (e.data?.type === "CTRL_KEY_STATE") {
@@ -212,10 +267,21 @@ export function LiveAuditView({
       if (e.data?.type === "PINS_MUTATED") {
         onPinSaved?.();
       }
+      if (e.data?.type === "AUDIT_VIEWER_ERROR") {
+        setViewerError({
+          status: typeof e.data.status === "number" ? e.data.status : undefined,
+          title: typeof e.data.title === "string" ? e.data.title : "Unable to load website",
+          message:
+            typeof e.data.message === "string"
+              ? e.data.message
+              : "The website view could not be loaded. Please try again.",
+        });
+        setIframeLoaded(true);
+      }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onCommentModeChange, onPinSaved, onPageChange]);
+  }, [onCommentModeChange, onPinSaved, onPageChange, auditUrl, postToIframe, onHighlightDone]);
 
   // When parent asks to highlight a pin: navigate iframe if needed, then send HIGHLIGHT
   useEffect(() => {
@@ -224,13 +290,12 @@ export function LiveAuditView({
       return;
     }
     const pin = highlightPin;
-    const pinPath = pin.pageUrl ? new URL(pin.pageUrl).pathname + new URL(pin.pageUrl).search : "";
+    const pinPath = getPagePathFromUrlLike(pin.pageUrl, auditUrl);
 
-    if (pinPath && pinPath !== currentPath) {
+    if (pinPath !== currentPath) {
       pendingHighlightRef.current = pin;
       pendingHighlightIndexRef.current = typeof highlightPinIndexInPage === "number" ? highlightPinIndexInPage : null;
       setIframeSrcPath(pinPath);
-      setCurrentPagePath(pinPath);
     } else {
       pendingHighlightRef.current = null;
       postToIframe({
@@ -244,17 +309,15 @@ export function LiveAuditView({
       }
       onHighlightDone?.();
     }
-  }, [highlightPin, highlightPinIndexInPage, auditId, currentPath, postToIframe, onHighlightDone]);
+  }, [highlightPin, highlightPinIndexInPage, currentPath, postToIframe, onHighlightDone, auditUrl]);
 
   useEffect(() => {
     if (!hoverHighlightPin) {
       postToIframe({ type: "CLEAR_HIGHLIGHT" });
       return;
     }
-    const pinPath = hoverHighlightPin.pageUrl
-      ? new URL(hoverHighlightPin.pageUrl).pathname + new URL(hoverHighlightPin.pageUrl).search
-      : "";
-    if (pinPath && pinPath !== currentPath) return;
+    const pinPath = getPagePathFromUrlLike(hoverHighlightPin.pageUrl, auditUrl);
+    if (pinPath !== currentPath) return;
     postToIframe({
       type: "HIGHLIGHT",
       selector: hoverHighlightPin.selector || null,
@@ -267,23 +330,7 @@ export function LiveAuditView({
 
   const handleIframeLoad = useCallback(() => {
     setIframeLoaded(true);
-    const pin = pendingHighlightRef.current;
-    if (pin) {
-      pendingHighlightRef.current = null;
-      const pinIndexInPage = pendingHighlightIndexRef.current;
-      pendingHighlightIndexRef.current = null;
-      postToIframe({
-        type: "HIGHLIGHT",
-        selector: pin.selector || null,
-        x: pin.x,
-        y: pin.y,
-      });
-      if (typeof pinIndexInPage === "number") {
-        postToIframe({ type: "SHOW_TOOLTIP", pinIndex: pinIndexInPage });
-      }
-      onHighlightDone?.();
-    }
-  }, [postToIframe, onHighlightDone]);
+  }, []);
 
   const handleSavePin = useCallback(async (pin: Pin) => {
     setPendingClick(null);
@@ -295,11 +342,12 @@ export function LiveAuditView({
     onPinSaved?.();
   }, [onSavePin, onPinSaved]);
 
-  const iframeSrc = `/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}`;
+  const iframeSrc = `/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}&v=${reloadNonce}`;
 
   // Show loading state again when path changes (e.g. user clicked a link in the iframe)
   useEffect(() => {
     setIframeLoaded(false);
+    setViewerError(null);
   }, [iframeSrc]);
 
   return (
@@ -322,6 +370,30 @@ export function LiveAuditView({
             onLoad={handleIframeLoad}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           />
+          {viewerError && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/85 p-4">
+              <div className="w-full max-w-lg rounded-xl border border-border bg-background p-4 shadow-lg">
+                <div className="text-xs text-muted-foreground mb-1">
+                  {viewerError.status ? `Error ${viewerError.status}` : "Load error"}
+                </div>
+                <h3 className="text-sm sm:text-base font-semibold">{viewerError.title || "Unable to load website"}</h3>
+                <p className="text-sm text-muted-foreground mt-1">{viewerError.message}</p>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-sm hover:bg-zinc-700/50 dark:hover:bg-zinc-300/50 transition-colors"
+                    onClick={() => {
+                      setViewerError(null);
+                      setIframeLoaded(false);
+                      setReloadNonce((n) => n + 1);
+                    }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pin Minimap — VS Code-style scrollbar showing where pins live on the full page */}

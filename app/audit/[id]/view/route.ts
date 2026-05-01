@@ -4,6 +4,114 @@ import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_PROTOCOLS = ["https:", "http:"];
 
+function normalizePath(pathname: string, search = ""): string {
+  const p = `${pathname}${search}`;
+  return p === "" || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
+}
+
+function getPinPath(pageUrl: string | undefined, auditOrigin: string): string {
+  if (!pageUrl) return "/";
+
+  const fromUrl = (u: URL) => {
+    const pathParam = u.searchParams.get("path");
+    if (pathParam) {
+      try {
+        const p = new URL(pathParam, auditOrigin);
+        return normalizePath(p.pathname, p.search);
+      } catch {
+        return "/";
+      }
+    }
+    return normalizePath(u.pathname, u.search);
+  };
+
+  try {
+    return fromUrl(new URL(pageUrl));
+  } catch {
+    try {
+      return fromUrl(new URL(pageUrl, auditOrigin));
+    } catch {
+      return "/";
+    }
+  }
+}
+
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function viewerErrorResponse(
+  status: number,
+  title: string,
+  message: string,
+  appOrigin: string,
+  auditId: string
+): NextResponse {
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message);
+  const body = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${safeTitle}</title>
+    <style>
+      html, body { margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b0b0e; color: #f4f4f5; }
+      .wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+      .card { width: min(620px, 100%); background: rgba(24,24,27,.9); border: 1px solid rgba(244,244,245,.15); border-radius: 14px; padding: 18px; }
+      .status { display: inline-block; font-size: 12px; color: #a1a1aa; border: 1px solid rgba(161,161,170,.35); border-radius: 999px; padding: 4px 10px; margin-bottom: 10px; }
+      h1 { margin: 0 0 8px 0; font-size: 18px; line-height: 1.35; }
+      p { margin: 0; color: #d4d4d8; line-height: 1.5; }
+      .actions { margin-top: 14px; display: flex; gap: 8px; }
+      button { border: 1px solid rgba(244,244,245,.2); background: #18181b; color: #fafafa; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+      button:hover { background: #27272a; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <span class="status">Error ${status}</span>
+        <h1>${safeTitle}</h1>
+        <p>${safeMessage}</p>
+        <div class="actions">
+          <button type="button" onclick="window.location.reload()">Try again</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function() {
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+              type: "AUDIT_VIEWER_ERROR",
+              status: ${status},
+              title: ${JSON.stringify(title)},
+              message: ${JSON.stringify(message)}
+            }, "*");
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>`;
+  return new NextResponse(body, {
+    status,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Frame-Options": "ALLOWALL",
+      "Content-Security-Policy": "frame-ancestors *",
+      "X-Audit-Viewer-Error": "1",
+      "X-Audit-Viewer-Id": `${auditId}`,
+      "Access-Control-Allow-Origin": appOrigin,
+    },
+  });
+}
+
 /**
  * Proxies the audit's live website and injects the comment overlay script.
  * GET /audit/[id]/view?path=/about -> fetches audit.url + path, rewrites links, injects script.
@@ -17,9 +125,10 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
+  const appOrigin = request.nextUrl.origin;
   const audit = await getAuditById(id);
   if (!audit) {
-    return new NextResponse("Audit not found", { status: 404 });
+    return viewerErrorResponse(404, "Audit not found", "This audit no longer exists or you may not have access to it.", appOrigin, id);
   }
 
   const path = request.nextUrl.searchParams.get("path") ?? "";
@@ -28,15 +137,15 @@ export async function GET(
   try {
     targetUrl = new URL(path.startsWith("http") ? path : baseUrl + (path.startsWith("/") ? path : "/" + path));
   } catch {
-    return new NextResponse("Invalid path", { status: 400 });
+    return viewerErrorResponse(400, "Invalid page path", "The requested page path could not be parsed.", appOrigin, id);
   }
 
   const auditOrigin = new URL(audit.url).origin;
   if (targetUrl.origin !== auditOrigin) {
-    return new NextResponse("Forbidden: path must be same origin as audit URL", { status: 403 });
+    return viewerErrorResponse(403, "Blocked cross-site navigation", "Navigation is limited to the original website for this audit.", appOrigin, id);
   }
   if (!ALLOWED_PROTOCOLS.includes(targetUrl.protocol)) {
-    return new NextResponse("Invalid protocol", { status: 400 });
+    return viewerErrorResponse(400, "Unsupported protocol", "Only http and https websites are supported.", appOrigin, id);
   }
 
   const fetchOptions = {
@@ -85,9 +194,12 @@ export async function GET(
         clearTimeout(t2);
       }
       if (!result.ok) {
-        return new NextResponse(
-          `Site returned ${result.status}. Some sites block automated requests.`,
-          { status: result.status }
+        return viewerErrorResponse(
+          result.status,
+          `Website returned ${result.status}`,
+          "This website blocked or failed the proxied request. Please try again, or open another page in the site.",
+          appOrigin,
+          id
         );
       }
     }
@@ -98,22 +210,18 @@ export async function GET(
       err instanceof Error && err.name === "AbortError"
         ? "Page took too long to respond"
         : "Failed to load page";
-    return new NextResponse(message, { status: 502 });
+    return viewerErrorResponse(502, "Website unavailable", message, appOrigin, id);
   }
-
-  const appOrigin = request.nextUrl.origin;
   const proxyViewBase = `${appOrigin}/audit/${id}/view`;
   const assetBase = `${appOrigin}/audit/${id}/asset`;
 
   // --- Pins for this page --------------------------------------------------
-  const targetHref = targetUrl.href.replace(/\/$/, "") || targetUrl.origin + "/";
+  const targetPath = normalizePath(targetUrl.pathname, targetUrl.search);
   const isRootPath = !path || path === "/";
   const pinsForPage = [...audit.pins, ...audit.userPins].filter(
     (pin: { pageUrl?: string }) => {
       if (pin.pageUrl) {
-        const pinUrl =
-          (pin.pageUrl as string).replace(/\/$/, "") || targetUrl.origin + "/";
-        return pinUrl === targetHref;
+        return getPinPath(pin.pageUrl as string, auditOrigin) === targetPath;
       }
       return isRootPath;
     }
@@ -368,12 +476,13 @@ function getHistoryShimScript(
       try { parsed = new URL(String(url)); } catch(e2) { parsed = new URL(String(url), window.location.origin); }
       var pathParam = parsed.searchParams ? parsed.searchParams.get('path') : null;
       var pageUrl;
-      if (pathParam) {
-        pageUrl = origin + (pathParam.charAt(0) === '/' ? pathParam : '/' + pathParam);
+      if (pathParam && /\/audit\/[^/]+\/view$/i.test(parsed.pathname || '')) {
+        var purl = new URL(pathParam, origin);
+        pageUrl = origin + purl.pathname + (purl.search || '') + (purl.hash || '');
       } else if (parsed.origin === origin) {
         pageUrl = parsed.href;
       } else {
-        var p = parsed.pathname + (parsed.search || '');
+        var p = parsed.pathname + (parsed.search || '') + (parsed.hash || '');
         pageUrl = origin + (p.charAt(0) === '/' ? p : '/' + p);
       }
       if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pageUrl = pageUrl;
@@ -394,6 +503,9 @@ function getHistoryShimScript(
     if (rewritten) notifyParentPageUrl(rewritten);
   };
   window.addEventListener('popstate', function() {
+    try { notifyParentPageUrl(window.location.href); } catch (e) {}
+  });
+  window.addEventListener('hashchange', function() {
     try { notifyParentPageUrl(window.location.href); } catch (e) {}
   });
 
@@ -598,6 +710,14 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     return null;
   }
 
+  function getCachedTargetElement(pin) {
+    var cached = pin && pin.__auditTargetEl;
+    if (cached && cached.isConnected) return cached;
+    var resolved = resolveTargetElement(pin);
+    pin.__auditTargetEl = resolved || null;
+    return resolved;
+  }
+
   var _highlightedEl = null;
   var _highlightTimer = null;
   function highlightPinTarget(pin) {
@@ -615,9 +735,9 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   }
 
   /* â”€â”€ Compute viewport-relative position for a pin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-  function computePinViewportPosition(pin, scrollContainer) {
+  function computePinViewportPosition(pin, scrollContainer, containerRect) {
     // Try to anchor to DOM element first (most robust)
-    var target = resolveTargetElement(pin);
+    var target = getCachedTargetElement(pin);
     if (target) {
       var r = target.getBoundingClientRect();
       return { vx: r.left + r.width / 2, vy: r.top, visible: true };
@@ -625,17 +745,17 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     // Fall back to saved coordinates
     if (scrollContainer) {
       // The pin's docX/docY are in the scroll container's coordinate space
-      var containerRect = scrollContainer.getBoundingClientRect();
+      var rect = containerRect || scrollContainer.getBoundingClientRect();
       if (typeof pin.docX === 'number' && typeof pin.docY === 'number') {
-        var vx = containerRect.left + pin.docX - scrollContainer.scrollLeft;
-        var vy = containerRect.top + pin.docY - scrollContainer.scrollTop;
+        var vx = rect.left + pin.docX - scrollContainer.scrollLeft;
+        var vy = rect.top + pin.docY - scrollContainer.scrollTop;
         return { vx: vx, vy: vy, visible: true };
       }
       if (pin.scrollX != null && pin.scrollY != null && pin.viewportWidth && pin.viewportHeight) {
         var docPx = pin.scrollX + (pin.x / 100) * pin.viewportWidth;
         var docPy = pin.scrollY + (pin.y / 100) * pin.viewportHeight;
-        var vx2 = containerRect.left + docPx - scrollContainer.scrollLeft;
-        var vy2 = containerRect.top + docPy - scrollContainer.scrollTop;
+        var vx2 = rect.left + docPx - scrollContainer.scrollLeft;
+        var vy2 = rect.top + docPy - scrollContainer.scrollTop;
         return { vx: vx2, vy: vy2, visible: true };
       }
     } else {
@@ -1330,22 +1450,32 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     clearPinHighlight();
   }
 
-  /* â”€â”€ Continuous repositioning of hotspots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-   * Use requestAnimationFrame to continuously reposition all pins.
-   * This handles ALL scroll containers, transforms, and layout changes
-   * without needing to know the scroll container ahead of time.
-   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* â”€â”€ On-demand hotspot repositioning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   * Reposition only when there is activity (scroll/resize/update), then run
+   * a short rAF burst to stay smooth during momentum/inertial scrolling.
+   * This avoids a permanent 60fps loop when the page is idle. */
   var rafId = null;
   var cachedScrollContainer = undefined; // undefined = not yet computed
+  var updateActiveUntil = 0;
+
+  function schedulePositionUpdate(runForMs) {
+    var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    var ms = typeof runForMs === 'number' ? runForMs : 0;
+    if (ms > 0) updateActiveUntil = Math.max(updateActiveUntil, now + ms);
+    if (rafId) return;
+    rafId = requestAnimationFrame(updateAllPositions);
+  }
 
   function updateAllPositions() {
+    rafId = null;
     var pins = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pins;
-    if (!pins) { rafId = requestAnimationFrame(updateAllPositions); return; }
+    if (!pins) return;
     if (cachedScrollContainer === undefined) cachedScrollContainer = findScrollContainer();
+    var containerRect = cachedScrollContainer ? cachedScrollContainer.getBoundingClientRect() : null;
     for (var i = 0; i < hotspotElements.length; i++) {
       var el = hotspotElements[i];
       if (!el) continue;
-      var pos = computePinViewportPosition(pins[i], cachedScrollContainer);
+      var pos = computePinViewportPosition(pins[i], cachedScrollContainer, containerRect);
       el.style.left = pos.vx + 'px';
       el.style.top = pos.vy + 'px';
       // Hide pins that are off-screen
@@ -1357,7 +1487,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     }
     // Update tooltip position if shown
     if (activeTooltipIndex >= 0 && tooltipEl && tooltipEl.style.display !== 'none' && pins[activeTooltipIndex]) {
-      var tpos = computePinViewportPosition(pins[activeTooltipIndex], cachedScrollContainer);
+      var tpos = computePinViewportPosition(pins[activeTooltipIndex], cachedScrollContainer, containerRect);
       var tvh = window.innerHeight, tMargin = 16, tMinH = 180;
       var tSpaceAbove = tpos.vy - 12 - tMargin;
       var tSpaceBelow = tvh - tpos.vy - 8 - tMargin;
@@ -1374,13 +1504,17 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         tooltipEl.style.transform = 'translate(-50%, 0)';
       }
     }
-    rafId = requestAnimationFrame(updateAllPositions);
+    var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (now < updateActiveUntil) {
+      rafId = requestAnimationFrame(updateAllPositions);
+    }
   }
 
   /* â”€â”€ Render hotspots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function cleanupHotspots() {
     cancelHideTooltip();
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    updateActiveUntil = 0;
     hotspotElements.forEach(function(el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
     hotspotElements = [];
     if (tooltipEl && tooltipEl.parentNode) tooltipEl.parentNode.removeChild(tooltipEl);
@@ -1433,6 +1567,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         var curPos = computePinViewportPosition(pin, cachedScrollContainer);
         showTooltip(pin, i, curPos.vx, curPos.vy);
         highlightPinTarget(pin);
+        schedulePositionUpdate(260);
       });
       el.addEventListener('mouseleave', function() {
         scheduleHideTooltip();
@@ -1440,9 +1575,8 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       hotspotElements.push(el);
       document.documentElement.appendChild(el);
     });
-    // Start the rAF loop
-    if (rafId) cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(updateAllPositions);
+    // Initial settle/update burst after rendering pins
+    schedulePositionUpdate(240);
 
     // After pin updates (e.g. reply posted → parent refresh → UPDATE_PINS), reopen the same thread so the modal does not disappear
     if (reopenThread && pins && pins.length) {
@@ -1459,6 +1593,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       if (ni >= 0) {
         var rpos = computePinViewportPosition(pins[ni], cachedScrollContainer);
         showTooltip(pins[ni], ni, rpos.vx, rpos.vy);
+        schedulePositionUpdate(300);
       }
     }
   }
@@ -1579,10 +1714,12 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         var pin = pins[idx];
         var pos = computePinViewportPosition(pin, cachedScrollContainer);
         showTooltip(pin, idx, pos.vx, pos.vy);
+        schedulePositionUpdate(300);
         // Scroll to pin's target element if it has a selector
         var target = resolveTargetElement(pin);
         if (target) {
           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          schedulePositionUpdate(420);
         }
       }
     }
@@ -1591,6 +1728,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
       var sc = cachedScrollContainer || findScrollContainer();
       if (sc) sc.scrollTo({ top: e.data.y, behavior: e.data.behavior || 'auto' });
       else window.scrollTo({ top: e.data.y, behavior: e.data.behavior || 'auto' });
+      schedulePositionUpdate(450);
     }
   });
 
@@ -1616,7 +1754,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         selector: selector,
         x: x, y: y,
         docX: docX, docY: docY,
-        pageUrl: window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl ? window.__AUDIT_VIEWER__.pageUrl : window.location.href,
+        pageUrl: window.location.href,
         viewportWidth: vw,
         viewportHeight: vh,
         scrollX: window.scrollX,
@@ -1627,7 +1765,8 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   }, true);
 
   if (window.parent !== window) {
-    var pageUrl = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl ? window.__AUDIT_VIEWER__.pageUrl : window.location.href;
+    var pageUrl = window.location.href;
+    if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pageUrl = pageUrl;
     window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
     
     function findScrollInfo() {
@@ -1654,9 +1793,14 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         scrollHeight: info.scrollHeight,
         clientHeight: info.clientHeight,
       }, '*');
+      schedulePositionUpdate(220);
     }
     window.addEventListener('scroll', sendScrollData, { passive: true });
-    window.addEventListener('resize', sendScrollData, { passive: true });
+    window.addEventListener('resize', function() {
+      cachedScrollContainer = undefined; // layout may have changed
+      sendScrollData();
+      schedulePositionUpdate(320);
+    }, { passive: true });
     // Also listen for scroll on inner containers
     setTimeout(function() {
       var sc = findScrollContainer();

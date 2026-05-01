@@ -38,7 +38,32 @@ function useTextScramble(text: string, active: boolean, duration = 350) {
 }
 
 function getPagePath(pin: Pin): string {
-  return (pin.pageUrl || "").replace(/\/$/, "") || "/";
+  if (!pin.pageUrl) return "/";
+  const normalize = (pathname: string, search = "", hash = "") => {
+    const p = `${pathname}${search}${hash}`;
+    return p === "" || p === "/" ? "/" : p.replace(/\/$/, "") || "/";
+  };
+  const fromUrl = (u: URL) => {
+    const pathParam = u.searchParams.get("path");
+    if (pathParam) {
+      try {
+        const p = new URL(pathParam, "http://_");
+        return normalize(p.pathname, p.search, p.hash);
+      } catch {
+        return "/";
+      }
+    }
+    return normalize(u.pathname, u.search, u.hash);
+  };
+  try {
+    return fromUrl(new URL(pin.pageUrl));
+  } catch {
+    try {
+      return fromUrl(new URL(pin.pageUrl, "http://_"));
+    } catch {
+      return "/";
+    }
+  }
 }
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";

@@ -35,6 +35,38 @@ function buildAllPins(pins: Pin[], userPins: Pin[]): PinWithIndex[] {
   ];
 }
 
+function getPinDisplayPath(pageUrl?: string): string {
+  if (!pageUrl) return "/index";
+
+  const normalize = (pathname: string, hash = "") => {
+    const base = !pathname || pathname === "/" ? "/index" : pathname.replace(/\/$/, "") || "/index";
+    return hash ? `${base}${hash}` : base;
+  };
+
+  const fromUrl = (u: URL) => {
+    const pathParam = u.searchParams.get("path");
+    if (pathParam) {
+      try {
+        const parsed = new URL(pathParam, "http://_");
+        return normalize(parsed.pathname, parsed.hash);
+      } catch {
+        return "/index";
+      }
+    }
+    return normalize(u.pathname || "/", u.hash || "");
+  };
+
+  try {
+    return fromUrl(new URL(pageUrl));
+  } catch {
+    try {
+      return fromUrl(new URL(pageUrl, "http://_"));
+    } catch {
+      return "/index";
+    }
+  }
+}
+
 function EditablePinCard({
   pin,
   isSelected,
@@ -117,15 +149,7 @@ function EditablePinCard({
     setEditing(false);
   };
 
-  const pagePath = (() => {
-    if (!pin.pageUrl) return "/index";
-    try {
-      const path = new URL(pin.pageUrl).pathname || "/";
-      return path === "/" ? "/index" : path;
-    } catch {
-      return "/index";
-    }
-  })();
+  const pagePath = getPinDisplayPath(pin.pageUrl);
 
   if (editing) {
     return (
