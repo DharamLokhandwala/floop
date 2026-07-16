@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "floop — Start a review",
+  "version": "0.1.0",
+  "description": "Launch a floop review for the website in your active tab.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Start a floop review"
+  },
+  "permissions": ["activeTab"]
+}

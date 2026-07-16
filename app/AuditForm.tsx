@@ -38,9 +38,13 @@ interface AuditFormProps {
   goalLabel?: string;
   /** Placeholder for the goal field. */
   goalPlaceholder?: string;
+  /** Prefill the URL field (e.g. from the Chrome extension launcher). Optional — omit to render an empty field. */
+  defaultUrl?: string;
+  /** When true, render a stripped-down form (URL only) — used by the extension launcher on /dashboard/new. Hides the goal field. */
+  minimal?: boolean;
 }
 
-export function AuditForm({ action, submitLabel = "Give feedback", showReviewerName, reviewerNameLabel, reviewerNameRequired = true, onSuccess, urlLabel, urlPlaceholder, goalLabel, goalPlaceholder }: AuditFormProps) {
+export function AuditForm({ action, submitLabel = "Give feedback", showReviewerName, reviewerNameLabel, reviewerNameRequired = true, onSuccess, urlLabel, urlPlaceholder, goalLabel, goalPlaceholder, defaultUrl, minimal }: AuditFormProps) {
   const [state, formAction, isPending] = useActionState(action, {});
   const formRef = useRef<HTMLFormElement | null>(null);
   const lastAuditIdRef = useRef<string | null>(null);
@@ -107,25 +111,28 @@ export function AuditForm({ action, submitLabel = "Give feedback", showReviewerN
           name="url"
           type="url"
           placeholder={urlPlaceholder ?? "https://yourwebsite.com"}
+          defaultValue={defaultUrl}
           required
           disabled={isPending}
           className="w-full h-11"
         />
       </div>
 
-      <div className="space-y-1.5">
-        <label htmlFor="goal" className="block text-[11px] font-medium uppercase tracking-widest text-zinc-400">
-          {goalLabel ?? "What should they focus on?"} <span className="normal-case tracking-normal font-normal text-zinc-300">(optional)</span>
-        </label>
-        <Textarea
-          id="goal"
-          name="goal"
-          placeholder={goalPlaceholder ?? "e.g. Does the hero section communicate clearly? Is the about page convincing?"}
-          rows={3}
-          disabled={isPending}
-          className="w-full resize-none"
-        />
-      </div>
+      {!minimal && (
+        <div className="space-y-1.5">
+          <label htmlFor="goal" className="block text-[11px] font-medium uppercase tracking-widest text-zinc-400">
+            {goalLabel ?? "What should they focus on?"} <span className="normal-case tracking-normal font-normal text-zinc-300">(optional)</span>
+          </label>
+          <Textarea
+            id="goal"
+            name="goal"
+            placeholder={goalPlaceholder ?? "e.g. Does the hero section communicate clearly? Is the about page convincing?"}
+            rows={3}
+            disabled={isPending}
+            className="w-full resize-none"
+          />
+        </div>
+      )}
 
       {showReviewerName && (
         <div className="space-y-1.5">
