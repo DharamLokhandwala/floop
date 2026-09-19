@@ -35,22 +35,38 @@ export default async function NewReviewPage({
     }
   }
 
+  let hostname: string | undefined;
+  if (defaultUrl) {
+    try {
+      hostname = new URL(defaultUrl).hostname;
+    } catch {
+      hostname = undefined;
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-6 space-y-1.5">
-          <h1 className="text-xl font-medium tracking-tight">Start a review</h1>
+          <h1 className="text-xl font-medium tracking-tight">
+            {defaultUrl ? "Review this website" : "Review a website"}
+          </h1>
           <p className="text-sm text-muted-foreground">
             {defaultUrl
-              ? "We prefilled the website from your browser tab. Confirm to start giving feedback."
+              ? "Make sure this is the page you want feedback on. You can edit the website below before starting."
               : "Enter a website URL to review."}
           </p>
         </div>
+        {hostname && (
+          <div className="mb-5 inline-flex max-w-full items-center rounded-full border border-border bg-muted/40 px-3 py-1 text-sm text-muted-foreground truncate">
+            {hostname}
+          </div>
+        )}
         <AuditForm
           action={runAudit}
           defaultUrl={defaultUrl}
           minimal
-          submitLabel="Start giving feedback"
+          submitLabel="Start reviewing"
           urlLabel="Website link"
           urlPlaceholder="https://example.com"
         />
