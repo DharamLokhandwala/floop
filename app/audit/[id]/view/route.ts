@@ -138,7 +138,12 @@ export async function GET(
   html = stripCorsAttributes(html);
 
   // 4. Inject <base> pointing at asset proxy so relative URLs also route through it
-  const historyShim = getHistoryShimScript(auditOrigin, proxyViewBase, assetBase);
+  const historyShim = getHistoryShimScript(
+    auditOrigin,
+    proxyViewBase,
+    assetBase,
+    originContext.appOrigin
+  );
   const baseTag = `<base href="${assetBase}/">`;
   if (/<head\b/i.test(html)) {
     html = html.replace(/<head\b[^>]*>/i, "$&" + historyShim + baseTag);
@@ -147,15 +152,21 @@ export async function GET(
   }
 
   // 5. Inject viewer script
-  const viewerScript = getViewerScript(id, targetUrl.href, pinsForPage, {
-    // The isolated viewer origin intentionally has no application session.
-    // Authenticated mutations remain in the parent app; the iframe is a
-    // rendering/instrumentation surface only.
-    viewerAuthenticated: false,
-    viewerIsOwner: false,
-    viewerUserId: null,
-    viewerName: null,
-  });
+  const viewerScript = getViewerScript(
+    id,
+    targetUrl.href,
+    pinsForPage,
+    {
+      // The isolated viewer origin intentionally has no application session.
+      // Authenticated mutations remain in the parent app; the iframe is a
+      // rendering/instrumentation surface only.
+      viewerAuthenticated: false,
+      viewerIsOwner: false,
+      viewerUserId: null,
+      viewerName: null,
+    },
+    originContext.appOrigin
+  );
   if (html.includes("</body>")) {
     html = html.replace("</body>", `${viewerScript}</body>`);
   } else {
@@ -349,17 +360,20 @@ function stripCorsAttributes(html: string): string {
 function getHistoryShimScript(
   auditOrigin: string,
   proxyViewBase: string,
-  assetBase: string
+  assetBase: string,
+  parentOrigin: string
 ): string {
   const originJson = JSON.stringify(auditOrigin);
   const proxyViewBaseJson = JSON.stringify(proxyViewBase);
   const assetBaseJson = JSON.stringify(assetBase);
+  const parentOriginJson = JSON.stringify(parentOrigin);
 
   return `<script>
 (function(){
   var origin=${originJson};
   var viewBase=${proxyViewBaseJson};
   var assetBase=${assetBaseJson};
+  var parentOrigin=${parentOriginJson};
 
   function rewrite(url){
     if(!url) return url;
@@ -387,7 +401,7 @@ function getHistoryShimScript(
         pageUrl = origin + (p.charAt(0) === '/' ? p : '/' + p);
       }
       if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pageUrl = pageUrl;
-      window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
+      window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, parentOrigin);
     } catch (e) {}
   }
 
@@ -458,21 +472,36 @@ function getViewerScript(
   auditId: string,
   pageUrl: string,
   pins: PinForScript[],
-  viewerContext: { viewerAuthenticated: boolean; viewerIsOwner: boolean; viewerUserId: string | null; viewerName: string | null }
+  viewerContext: { viewerAuthenticated: boolean; viewerIsOwner: boolean; viewerUserId: string | null; viewerName: string | null },
+  parentOrigin: string
 ): string {
   const pinsJson = JSON.stringify(pins);
   const vAuth = JSON.stringify(viewerContext.viewerAuthenticated);
   const vOwner = JSON.stringify(viewerContext.viewerIsOwner);
   const vUserId = JSON.stringify(viewerContext.viewerUserId);
   const vName = JSON.stringify(viewerContext.viewerName);
+  const parentOriginJson = JSON.stringify(parentOrigin);
   const script = `
 <script>
 window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson}, viewerAuthenticated: ${vAuth}, viewerIsOwner: ${vOwner}, viewerUserId: ${vUserId}, viewerName: ${vName} };
 (function() {
+  var parentOrigin = ${parentOriginJson};
+  var parentMessageTypes = {
+    SET_COMMENT_MODE: true,
+    UPDATE_PINS: true,
+    HIGHLIGHT: true,
+    CLEAR_HIGHLIGHT: true,
+    SHOW_TOOLTIP: true,
+    SCROLL_TO: true
+  };
   var commentMode = false;
   var ctrlHeld = false; // tracks whether the modifier key is physically held in this frame
   var hotspotElements = [];
   var categoryColors = { SEO: '#3b82f6', 'Visual Design': '#a855f7', CRO: '#22c55e', Feedback: '#3A3CFF' };
+
+  function postToParent(message) {
+    if (window.parent !== window) window.parent.postMessage(message, parentOrigin);
+  }
 
   /* â”€â”€ Hover highlight overlay for comment mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   var hoverOverlay = null;
@@ -516,9 +545,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     if (document.documentElement) document.documentElement.style.cursor = active ? 'crosshair' : '';
     if (active) createHoverOverlay();
     else hideHoverOverlay();
-    if (window.parent !== window) {
-      window.parent.postMessage({ type: 'CTRL_KEY_STATE', held: active }, '*');
-    }
+    postToParent({ type: 'CTRL_KEY_STATE', held: active });
   }
 
   document.addEventListener('keydown', function(e) {
@@ -1104,7 +1131,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
             cancelHideTooltip();
             if (replyJustPostedSafetyTimer) clearTimeout(replyJustPostedSafetyTimer);
             replyJustPostedSafetyTimer = setTimeout(function() { replyJustPosted = false; replyJustPostedSafetyTimer = null; }, 8000);
-            if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+            postToParent({ type: 'PINS_MUTATED' });
           })
           .catch(function(e) {
             replyBtn.disabled = false;
@@ -1137,7 +1164,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
             .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
             .then(function(x) {
               if (!x.res.ok) throw new Error(x.data.error || 'Failed');
-              if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+              postToParent({ type: 'PINS_MUTATED' });
               hideTooltip();
             })
             .catch(function(e) {
@@ -1188,7 +1215,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
                 if (!x.res.ok) throw new Error(x.data.error || 'Failed');
                 pin.feedback = newText;
                 bubble.innerHTML = escHtml(newText);
-                if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+                postToParent({ type: 'PINS_MUTATED' });
               })
               .catch(function(e) {
                 saveBtn.disabled = false;
@@ -1246,7 +1273,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
                   if (!x.res.ok) throw new Error(x.data.error || 'Failed');
                   reply.body = newBody;
                   bubble.innerHTML = escHtml(newBody);
-                  if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+                  postToParent({ type: 'PINS_MUTATED' });
                 })
                 .catch(function(er) {
                   rSave.disabled = false;
@@ -1290,7 +1317,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
               .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
               .then(function(x) {
                 if (!x.res.ok) throw new Error(x.data.error || 'Failed');
-                if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+                postToParent({ type: 'PINS_MUTATED' });
               })
               .catch(function(er) {
                 bar.remove();
@@ -1503,6 +1530,30 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   }
 
   window.addEventListener('message', function(e) {
+    var messageType = e.data && typeof e.data === 'object' && typeof e.data.type === 'string'
+      ? e.data.type
+      : null;
+    var expectedOrigin = e.origin === parentOrigin;
+    var expectedSource = e.source === window.parent;
+
+    if (!expectedOrigin || !expectedSource) {
+      console.warn('[floop viewer] Rejected postMessage from unexpected sender', {
+        origin: e.origin,
+        type: messageType,
+        expectedOrigin: parentOrigin,
+        sourceMatchesParent: expectedSource
+      });
+      return;
+    }
+
+    if (!messageType || !parentMessageTypes[messageType]) {
+      console.warn('[floop viewer] Rejected unexpected parent message', {
+        origin: e.origin,
+        type: messageType
+      });
+      return;
+    }
+
     if (e.data && e.data.type === 'SET_COMMENT_MODE') {
       var newVal = e.data.value;
       // Don't let the parent turn off comment mode if the modifier key is
@@ -1582,7 +1633,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     var docY = typeof e.pageY === 'number' ? e.pageY : (window.scrollY + e.clientY);
     var selector = getSelector(target);
     if (window.parent !== window) {
-      window.parent.postMessage({
+      postToParent({
         type: 'AUDIT_VIEWER_CLICK',
         selector: selector,
         x: x, y: y,
@@ -1592,14 +1643,14 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         viewportHeight: vh,
         scrollX: window.scrollX,
         scrollY: window.scrollY
-      }, '*');
+      });
     }
     hideHoverOverlay();
   }, true);
 
   if (window.parent !== window) {
     var pageUrl = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl ? window.__AUDIT_VIEWER__.pageUrl : window.location.href;
-    window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
+    postToParent({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl });
     
     function findScrollInfo() {
       var sc = cachedScrollContainer || findScrollContainer();
@@ -1619,12 +1670,12 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     
     function sendScrollData() {
       var info = findScrollInfo();
-      window.parent.postMessage({
+      postToParent({
         type: 'AUDIT_SCROLL',
         scrollTop: info.scrollTop,
         scrollHeight: info.scrollHeight,
         clientHeight: info.clientHeight,
-      }, '*');
+      });
     }
     window.addEventListener('scroll', sendScrollData, { passive: true });
     window.addEventListener('resize', sendScrollData, { passive: true });

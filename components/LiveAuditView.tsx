@@ -32,6 +32,18 @@ const CATEGORY_COLORS: Record<string, string> = {
   Feedback: "var(--color-floop-blue)",
 };
 
+const VIEWER_MESSAGE_TYPES = new Set([
+  "AUDIT_VIEWER_CLICK",
+  "AUDIT_SCROLL",
+  "AUDIT_VIEWER_READY",
+  "CTRL_KEY_STATE",
+]);
+
+function getMessageType(data: unknown): string | null {
+  if (!data || typeof data !== "object" || !("type" in data)) return null;
+  return typeof data.type === "string" ? data.type : null;
+}
+
 interface LiveAuditViewProps {
   auditId: string;
   auditUrl: string;
@@ -110,9 +122,9 @@ export function LiveAuditView({
 
   const postToIframe = useCallback(
     (data: unknown) => {
-      iframeRef.current?.contentWindow?.postMessage(data, "*");
+      iframeRef.current?.contentWindow?.postMessage(data, viewerOrigin);
     },
-    []
+    [viewerOrigin]
   );
 
   // Send comment mode to iframe
@@ -159,6 +171,29 @@ export function LiveAuditView({
   // Listen for messages from iframe
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      const iframeWindow = iframeRef.current?.contentWindow;
+      const messageType = getMessageType(e.data);
+      const expectedOrigin = e.origin === viewerOrigin;
+      const expectedSource = Boolean(iframeWindow) && e.source === iframeWindow;
+
+      if (!expectedOrigin || !expectedSource) {
+        console.warn("[floop parent] Rejected postMessage from unexpected sender", {
+          origin: e.origin,
+          type: messageType,
+          expectedOrigin: viewerOrigin,
+          sourceMatchesViewer: expectedSource,
+        });
+        return;
+      }
+
+      if (!messageType || !VIEWER_MESSAGE_TYPES.has(messageType)) {
+        console.warn("[floop parent] Rejected unexpected viewer message", {
+          origin: e.origin,
+          type: messageType,
+        });
+        return;
+      }
+
       if (e.data?.type === "AUDIT_VIEWER_CLICK") {
         const clickPayload = {
           x: e.data.x,
@@ -206,13 +241,10 @@ export function LiveAuditView({
       if (e.data?.type === "CTRL_KEY_STATE") {
         onCommentModeChange(e.data.held);
       }
-      if (e.data?.type === "PINS_MUTATED") {
-        onPinSaved?.();
-      }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onCommentModeChange, onPinSaved]);
+  }, [onCommentModeChange, viewerOrigin]);
 
   // When parent asks to highlight a pin: navigate iframe if needed, then send HIGHLIGHT
   useEffect(() => {
