@@ -1,4 +1,5 @@
 import { getAuditById } from "@/lib/audits";
+import { getViewerOriginContext } from "@/lib/viewer-origin-server";
 import { NextRequest, NextResponse } from "next/server";
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -36,6 +37,17 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string; path: string[] }> }
 ) {
+  let originContext;
+  try {
+    originContext = getViewerOriginContext(request);
+  } catch (error) {
+    console.error("Viewer origin configuration error:", error);
+    return new NextResponse("Viewer origin is not configured safely", { status: 503 });
+  }
+  if (!originContext) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const { id, path } = await context.params;
   const audit = await getAuditById(id);
   if (!audit) {
@@ -81,15 +93,14 @@ export async function GET(
     const isCSS = contentType.includes("text/css");
     if (isCSS) {
       const body = await upstream.arrayBuffer();
-      const appOrigin = request.nextUrl.origin;
-      const assetBase = `${appOrigin}/audit/${id}/asset`;
+      const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset`;
       let css = new TextDecoder().decode(body);
       css = rewriteCssUrls(css, auditOrigin, assetBase);
       return new NextResponse(css, {
         headers: {
           "Content-Type": contentType,
-          "Cache-Control": "public, max-age=86400, immutable",
-          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "private, max-age=3600",
+          "Access-Control-Allow-Origin": originContext.viewerOrigin,
         },
       });
     }
@@ -97,8 +108,8 @@ export async function GET(
     // Stream non-HTML (JS, images, fonts, etc.) directly without buffering
     const streamHeaders: Record<string, string> = {
       "Content-Type": contentType,
-      "Cache-Control": "public, max-age=86400, immutable",
-      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "private, max-age=3600",
+      "Access-Control-Allow-Origin": originContext.viewerOrigin,
     };
     if (upstream.headers.get("content-length")) {
       streamHeaders["Content-Length"] = upstream.headers.get("content-length")!;

@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { InlineCommentInput, type PendingLiveClick } from "@/components/InlineCommentInput";
+import { getViewerOrigin } from "@/lib/viewer-origin";
 import type { Pin } from "@/types/audit";
 
 /** Normalize pin's page to path (pathname + search) for comparison with iframe path */
@@ -84,6 +85,7 @@ export function LiveAuditView({
   const indicatorRef = useRef<HTMLDivElement>(null);
   const [scrollHeight, setScrollHeight] = useState(0);
   const [clientHeight, setClientHeight] = useState(0);
+  const viewerOrigin = useMemo(() => getViewerOrigin(), []);
 
   const currentPath = useMemo(() => {
     const p = currentPagePath || "/";
@@ -290,7 +292,7 @@ export function LiveAuditView({
     onPinSaved?.();
   }, [onSavePin, onPinSaved]);
 
-  const iframeSrc = `/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}`;
+  const iframeSrc = `${viewerOrigin}/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}`;
 
   // Show loading state again when path changes (e.g. user clicked a link in the iframe)
   useEffect(() => {
@@ -316,6 +318,8 @@ export function LiveAuditView({
             className="w-full h-full min-h-[280px] sm:min-h-[400px] block border-0 bg-white"
             onLoad={handleIframeLoad}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            allow="camera 'none'; microphone 'none'; geolocation 'none'"
+            referrerPolicy="no-referrer"
           />
         </div>
 

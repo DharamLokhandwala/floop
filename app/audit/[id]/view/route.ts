@@ -1,5 +1,5 @@
 import { getAuditById } from "@/lib/audits";
-import { getCurrentUser } from "@/lib/auth";
+import { getViewerOriginContext } from "@/lib/viewer-origin-server";
 import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_PROTOCOLS = ["https:", "http:"];
@@ -16,6 +16,17 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  let originContext;
+  try {
+    originContext = getViewerOriginContext(request);
+  } catch (error) {
+    console.error("Viewer origin configuration error:", error);
+    return new NextResponse("Viewer origin is not configured safely", { status: 503 });
+  }
+  if (!originContext) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const { id } = await context.params;
   const audit = await getAuditById(id);
   if (!audit) {
@@ -101,9 +112,8 @@ export async function GET(
     return new NextResponse(message, { status: 502 });
   }
 
-  const appOrigin = request.nextUrl.origin;
-  const proxyViewBase = `${appOrigin}/audit/${id}/view`;
-  const assetBase = `${appOrigin}/audit/${id}/asset`;
+  const proxyViewBase = `${originContext.viewerOrigin}/audit/${id}/view`;
+  const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset`;
 
   // --- Pins for this page --------------------------------------------------
   const targetHref = targetUrl.href.replace(/\/$/, "") || targetUrl.origin + "/";
@@ -136,17 +146,15 @@ export async function GET(
     html = html.replace(/<html\b/i, "<html><head>" + historyShim + baseTag + "</head>");
   }
 
-  const sessionUser = await getCurrentUser();
-  const createdById = audit.createdById ?? null;
-  const viewerAuthenticated = !!sessionUser;
-  const viewerIsOwner = !!(sessionUser && createdById && sessionUser.id === createdById);
-
   // 5. Inject viewer script
   const viewerScript = getViewerScript(id, targetUrl.href, pinsForPage, {
-    viewerAuthenticated,
-    viewerIsOwner,
-    viewerUserId: sessionUser?.id ?? null,
-    viewerName: sessionUser?.name || sessionUser?.email || null,
+    // The isolated viewer origin intentionally has no application session.
+    // Authenticated mutations remain in the parent app; the iframe is a
+    // rendering/instrumentation surface only.
+    viewerAuthenticated: false,
+    viewerIsOwner: false,
+    viewerUserId: null,
+    viewerName: null,
   });
   if (html.includes("</body>")) {
     html = html.replace("</body>", `${viewerScript}</body>`);
@@ -157,8 +165,10 @@ export async function GET(
   return new NextResponse(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "X-Frame-Options": "ALLOWALL",
-      "Content-Security-Policy": "frame-ancestors *",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": `frame-ancestors ${originContext.appOrigin}`,
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+      "Referrer-Policy": "no-referrer",
     },
   });
 }
