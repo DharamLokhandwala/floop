@@ -2,6 +2,7 @@ import { canViewAudit, getAuditById } from "@/lib/audits";
 import { verifyAuditViewerAccessToken } from "@/lib/audit-viewer-access";
 import { getViewerOriginContext } from "@/lib/viewer-origin-server";
 import { ssrfSafeFetch, SsrfBlockedError } from "@/lib/ssrf";
+import { USABLE_ELEMENT_ID_PATTERN } from "@/lib/element-selector";
 import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_PROTOCOLS = ["https:", "http:"];
@@ -514,11 +515,15 @@ function getViewerScript(
   const vUserId = JSON.stringify(viewerContext.viewerUserId);
   const vName = JSON.stringify(viewerContext.viewerName);
   const parentOriginJson = JSON.stringify(parentOrigin);
+  const usableElementIdPatternSourceJson = JSON.stringify(
+    USABLE_ELEMENT_ID_PATTERN.source
+  );
   const script = `
 <script>
 window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson}, viewerAuthenticated: ${vAuth}, viewerIsOwner: ${vOwner}, viewerUserId: ${vUserId}, viewerName: ${vName} };
 (function() {
   var parentOrigin = ${parentOriginJson};
+  var usableElementIdPattern = new RegExp(${usableElementIdPatternSourceJson});
   var parentMessageTypes = {
     SET_COMMENT_MODE: true,
     UPDATE_PINS: true,
@@ -1539,7 +1544,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   function getSelector(el) {
     if (!el || el === document.body || el === document.documentElement) return null;
     if (el.id === 'audit-comment-hover-overlay' || el.id === 'audit-viewer-hotspots' || el.id === 'audit-viewer-tooltip' || el.classList.contains('audit-viewer-hotspot')) return null;
-    if (el.id && /^[a-zA-Z][\\\\w.-]*$/.test(el.id)) return '#' + el.id;
+    if (el.id && usableElementIdPattern.test(el.id)) return '#' + el.id;
     var path = [], e = el;
     while (e && e !== document.body) {
       var tag = e.tagName.toLowerCase();
