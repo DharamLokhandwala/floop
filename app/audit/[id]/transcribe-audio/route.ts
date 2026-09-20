@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { put } from "@vercel/blob";
 import { v4 } from "uuid";
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { canViewAudit } from "@/lib/audits";
 
 export const maxDuration = 60;
 
@@ -13,14 +13,17 @@ export async function POST(
   try {
     const { id } = await params;
 
-    // Allow anonymous on request_feedback audits (same rule as add-pin)
-    const rows = await prisma.$queryRaw<[{ mode: string | null }]>`
-      SELECT mode FROM Audit WHERE id = ${id}
-    `;
-    const allowAnonymous = rows[0]?.mode === "request_feedback";
     const user = await getCurrentUser();
-    if (!allowAnonymous && !user) {
-      return NextResponse.json({ error: "Sign in to add a comment" }, { status: 401 });
+    const allowed = await canViewAudit(id, user?.id ?? null);
+    if (!allowed) {
+      return NextResponse.json(
+        {
+          error: user
+            ? "You do not have access to this audit"
+            : "Sign in to add a comment",
+        },
+        { status: user ? 403 : 401 }
+      );
     }
 
     const elevenLabsKey = process.env.ELEVENLABS_API_KEY;

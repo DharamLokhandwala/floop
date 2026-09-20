@@ -1,4 +1,5 @@
-import { getAuditById } from "@/lib/audits";
+import { canViewAudit, getAuditById } from "@/lib/audits";
+import { verifyAuditViewerAccessToken } from "@/lib/audit-viewer-access";
 import { getViewerOriginContext } from "@/lib/viewer-origin-server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -6,7 +7,8 @@ const ALLOWED_PROTOCOLS = ["https:", "http:"];
 
 /**
  * Proxies the audit's live website and injects the comment overlay script.
- * GET /audit/[id]/view?path=/about -> fetches audit.url + path, rewrites links, injects script.
+ * GET /audit/[id]/view?viewerToken=...&path=/about fetches audit.url + path,
+ * rewrites links, and injects the viewer script after validating access.
  *
  * All sub-resource URLs (JS, CSS, fonts, images) pointing to the target origin
  * are rewritten to go through /audit/[id]/asset/â€¦ so the browser never makes
@@ -28,6 +30,15 @@ export async function GET(
   }
 
   const { id } = await context.params;
+  const viewerToken = request.nextUrl.searchParams.get("viewerToken");
+  if (!viewerToken) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  const viewerAccess = verifyAuditViewerAccessToken(viewerToken, id);
+  if (!viewerAccess || !(await canViewAudit(id, viewerAccess.userId))) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const audit = await getAuditById(id);
   if (!audit) {
     return new NextResponse("Audit not found", { status: 404 });
@@ -112,28 +123,45 @@ export async function GET(
     return new NextResponse(message, { status: 502 });
   }
 
-  const proxyViewBase = `${originContext.viewerOrigin}/audit/${id}/view`;
-  const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset`;
+  const encodedViewerToken = encodeURIComponent(viewerToken);
+  const proxyViewBase = `${originContext.viewerOrigin}/audit/${id}/view?viewerToken=${encodedViewerToken}`;
+  const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset/${encodedViewerToken}`;
 
   // --- Pins for this page --------------------------------------------------
   const targetHref = targetUrl.href.replace(/\/$/, "") || targetUrl.origin + "/";
   const isRootPath = !path || path === "/";
-  const pinsForPage = [...audit.pins, ...audit.userPins].filter(
-    (pin: { pageUrl?: string }) => {
+  const pinsForPage: PinForScript[] = [...audit.pins, ...audit.userPins]
+    .filter((pin: { pageUrl?: string }) => {
       if (pin.pageUrl) {
         const pinUrl =
           (pin.pageUrl as string).replace(/\/$/, "") || targetUrl.origin + "/";
         return pinUrl === targetHref;
       }
       return isRootPath;
-    }
-  );
+    })
+    .map((pin) => ({
+      id: pin.id,
+      x: pin.x,
+      y: pin.y,
+      category: pin.category,
+      feedback: pin.feedback,
+      selector: pin.selector,
+      viewportWidth: pin.viewportWidth,
+      viewportHeight: pin.viewportHeight,
+      scrollX: pin.scrollX,
+      scrollY: pin.scrollY,
+      docX: pin.docX,
+      docY: pin.docY,
+      authorId: pin.authorId,
+      authorName: pin.authorName,
+      replies: pin.replies,
+    }));
 
   // --- Rewrite HTML ---------------------------------------------------------
   // 1. Rewrite <a> navigation links â†’ view proxy
   html = rewriteNavigationLinks(html, targetUrl.href, auditOrigin, proxyViewBase);
   // 2. Rewrite full-origin and absolute-path sub-resource URLs â†’ asset proxy
-  html = rewriteResourceUrls(html, auditOrigin, assetBase, proxyViewBase, id);
+  html = rewriteResourceUrls(html, auditOrigin, assetBase, proxyViewBase);
   // 3. Strip attributes that trigger CORS or SRI failures on proxied content
   html = stripCorsAttributes(html);
 
@@ -217,7 +245,7 @@ function rewriteNavigationLinks(
       }
       if (resolved.origin !== allowedOrigin) return match;
       const path = resolved.pathname + resolved.search;
-      const newHref = `${proxyViewBase}?path=${encodeURIComponent(path)}`;
+      const newHref = `${proxyViewBase}&path=${encodeURIComponent(path)}`;
       return `<a ${attrs}href="${newHref}"`;
     }
   );
@@ -234,12 +262,11 @@ function rewriteResourceUrls(
   html: string,
   auditOrigin: string,
   assetBase: string,
-  proxyViewBase: string,
-  auditId: string
+  proxyViewBase: string
 ): string {
   const escaped = auditOrigin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // Asset path prefix without origin: /audit/{id}/asset
-  const assetPathPrefix = `/audit/${auditId}/asset`;
+  const assetPathPrefix = new URL(assetBase).pathname;
 
   // 1) Full-origin refs on resource-like tags: https://origin/â€¦ â†’ assetBase/â€¦
   html = html.replace(
@@ -314,7 +341,7 @@ function rewriteResourceUrls(
     /(<form\s[^>]*?\saction\s*=\s*["'])(\/[^"']*)(["'])/gi,
     (_m, prefix, path, suffix) => {
       if (path.startsWith("//")) return _m;
-      return `${prefix}${proxyViewBase}?path=${encodeURIComponent(path)}${suffix}`;
+      return `${prefix}${proxyViewBase}&path=${encodeURIComponent(path)}${suffix}`;
     }
   );
 
@@ -381,7 +408,7 @@ function getHistoryShimScript(
     if(s.indexOf(origin)!==0) return s;
     try{
       var u=new URL(s);
-      return viewBase+'?path='+encodeURIComponent(u.pathname+u.search);
+      return viewBase+'&path='+encodeURIComponent(u.pathname+u.search);
     }catch(e){return s;}
   }
 

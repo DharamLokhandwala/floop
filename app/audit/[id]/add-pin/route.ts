@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
-import { addUserPin as addPinToDb } from "@/lib/audits";
+import { addUserPin as addPinToDb, canViewAudit } from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import type { Pin } from "@/types/audit";
@@ -11,13 +10,17 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const rows = await prisma.$queryRaw<[{ mode: string | null }]>`
-    SELECT mode FROM Audit WHERE id = ${id}
-  `;
-  const allowAnonymous = rows[0]?.mode === "request_feedback";
   const user = await getCurrentUser();
-  if (!allowAnonymous && !user) {
-    return NextResponse.json({ error: "Sign in to add a comment" }, { status: 401 });
+  const allowed = await canViewAudit(id, user?.id ?? null);
+  if (!allowed) {
+    return NextResponse.json(
+      {
+        error: user
+          ? "You do not have access to this audit"
+          : "Sign in to add a comment",
+      },
+      { status: user ? 403 : 401 }
+    );
   }
   try {
     const body = await request.json();

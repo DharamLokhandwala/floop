@@ -51,7 +51,6 @@ import { FeedbackSidebar } from "@/components/FeedbackSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ShareModal } from "@/components/ShareModal";
 import { ShareFeedbackLinkModal } from "@/components/ShareFeedbackLinkModal";
-import { LoginForm } from "@/components/LoginForm";
 import { FloopTipModal } from "@/components/FloopTipModal";
 import type { Pin } from "@/types/audit";
 
@@ -66,11 +65,11 @@ interface AuditPageClientProps {
   shareVisibility: "public" | "private";
   isOwner: boolean;
   isAuthenticated?: boolean;
-  sharedByName?: string | null;
   allowAnonymousComments?: boolean;
   linkCreated?: boolean;
   isRequestFeedback?: boolean;
   currentUserId?: string;
+  viewerAccessToken: string;
 }
 
 function buildAllPins(pins: Pin[], userPins: Pin[]): (Pin & { index: number })[] {
@@ -91,11 +90,11 @@ export function AuditPageClient({
   shareVisibility,
   isOwner,
   isAuthenticated = true,
-  sharedByName,
   allowAnonymousComments = false,
   linkCreated = false,
   isRequestFeedback = false,
   currentUserId,
+  viewerAccessToken,
 }: AuditPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -216,11 +215,8 @@ export function AuditPageClient({
     [auditId]
   );
 
-  const callbackUrl = `/audit/${auditId}?view=shared`;
-
-  const showLoginOverlay = !isAuthenticated && !allowAnonymousComments;
   const showOnboardingBlur = allowAnonymousComments && !onboardingDismissed;
-  const blurMain = showLoginOverlay || showOnboardingBlur;
+  const blurMain = showOnboardingBlur;
   const showFloopTipModal =
     isAuthenticated && floopTipFromDashboard && !floopTipDismissed;
 
@@ -327,6 +323,7 @@ export function AuditPageClient({
               onPinSaved={() => router.refresh()}
               initialPath={initialPath}
               hoverHighlightPin={hoverHighlightPin}
+              viewerAccessToken={viewerAccessToken}
             />
           </div>
           <div className="w-full lg:w-auto shrink-0 border-t lg:border-t-0 lg:border-l border-border">
@@ -348,23 +345,6 @@ export function AuditPageClient({
           </div>
         </main>
       </div>
-
-      {showLoginOverlay && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-background/50 backdrop-blur-md" />
-          <div className="relative w-full max-w-sm bg-background border border-border rounded-2xl shadow-2xl p-8">
-            <div className="text-center space-y-2 mb-6">
-              <h2 className="text-xl font-semibold tracking-tight">
-                {sharedByName} has shared feedback with you
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Sign in to view all the feedbacks
-              </p>
-            </div>
-            <LoginForm callbackUrl={callbackUrl} />
-          </div>
-        </div>
-      )}
 
       <FloopTipModal
         open={showFloopTipModal}

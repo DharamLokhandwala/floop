@@ -1,4 +1,5 @@
-import { getAuditById } from "@/lib/audits";
+import { canViewAudit, getAuditById } from "@/lib/audits";
+import { verifyAuditViewerAccessToken } from "@/lib/audit-viewer-access";
 import { getViewerOriginContext } from "@/lib/viewer-origin-server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -30,7 +31,7 @@ const MIME_BY_EXT: Record<string, string> = {
  * Proxies sub-resources (JS, CSS, fonts, images …) from the audit target
  * origin so the browser never makes cross-origin requests.
  *
- *   GET /audit/[id]/asset/assets/index.js
+ *   GET /audit/[id]/asset/<viewer-token>/assets/index.js
  *   → fetches https://<audit-origin>/assets/index.js and streams it back.
  */
 export async function GET(
@@ -49,13 +50,25 @@ export async function GET(
   }
 
   const { id, path } = await context.params;
+  const [viewerToken, ...resourceSegments] = path;
+  if (!viewerToken) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  const viewerAccess = verifyAuditViewerAccessToken(viewerToken, id);
+  if (!viewerAccess || !(await canViewAudit(id, viewerAccess.userId))) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  if (resourceSegments.length === 0) {
+    return new NextResponse("Asset path is required", { status: 400 });
+  }
+
   const audit = await getAuditById(id);
   if (!audit) {
     return new NextResponse("Audit not found", { status: 404 });
   }
 
   const auditOrigin = new URL(audit.url).origin;
-  const resourcePath = "/" + path.join("/");
+  const resourcePath = "/" + resourceSegments.join("/");
   const search = request.nextUrl.search;
   const targetUrl = auditOrigin + resourcePath + search;
 
@@ -93,7 +106,7 @@ export async function GET(
     const isCSS = contentType.includes("text/css");
     if (isCSS) {
       const body = await upstream.arrayBuffer();
-      const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset`;
+      const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset/${encodeURIComponent(viewerToken)}`;
       let css = new TextDecoder().decode(body);
       css = rewriteCssUrls(css, auditOrigin, assetBase);
       return new NextResponse(css, {

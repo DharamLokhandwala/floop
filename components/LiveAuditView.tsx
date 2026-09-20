@@ -66,6 +66,8 @@ interface LiveAuditViewProps {
   initialPath?: string;
   /** Pin to highlight on hover (persistent outline, no scroll, no tooltip) */
   hoverHighlightPin?: Pin | null;
+  /** Short-lived capability for the cookie-less viewer origin. */
+  viewerAccessToken: string;
 }
 
 export function LiveAuditView({
@@ -82,6 +84,7 @@ export function LiveAuditView({
   onPinSaved,
   initialPath = "",
   hoverHighlightPin = null,
+  viewerAccessToken,
 }: LiveAuditViewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [pendingClick, setPendingClick] = useState<PendingLiveClick | null>(null);
@@ -324,7 +327,7 @@ export function LiveAuditView({
     onPinSaved?.();
   }, [onSavePin, onPinSaved]);
 
-  const iframeSrc = `${viewerOrigin}/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}`;
+  const iframeSrc = `${viewerOrigin}/audit/${auditId}/view?viewerToken=${encodeURIComponent(viewerAccessToken)}&path=${encodeURIComponent(iframeSrcPath || "/")}`;
 
   // Show loading state again when path changes (e.g. user clicked a link in the iframe)
   useEffect(() => {

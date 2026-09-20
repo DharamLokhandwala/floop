@@ -612,13 +612,23 @@ export async function shareAuditWithEmail(auditId: string, email: string, shared
 }
 
 export async function canViewAudit(auditId: string, userId: string | null): Promise<boolean> {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    select: {
+      createdById: true,
+      shareVisibility: true,
+      mode: true,
+    },
+  });
   if (!audit) return false;
-  if (!userId) return false; // require sign-in to view any shared feedback
-  const row = audit as AuditOwnerFields;
-  if (row.shareVisibility === "public") return true;
-  if (!row.createdById) return true; // legacy audits without owner: allow all
-  if (row.createdById === userId) return true;
+  if (!userId) {
+    // Request-feedback links are the one deliberate anonymous product mode.
+    // They are created public; making one private must revoke anonymous access.
+    return audit.mode === "request_feedback" && audit.shareVisibility === "public";
+  }
+  if (audit.shareVisibility === "public") return true;
+  if (!audit.createdById) return true; // legacy audits without owner: allow signed-in users
+  if (audit.createdById === userId) return true;
   const share = await prisma.auditShare.findUnique({
     where: { auditId_sharedWithUserId: { auditId, sharedWithUserId: userId } },
   });
