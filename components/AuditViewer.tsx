@@ -2,7 +2,10 @@
 
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { InlineCommentInput } from "@/components/InlineCommentInput";
+import {
+  InlineCommentInput,
+  type PendingAudioAttachment,
+} from "@/components/InlineCommentInput";
 import type { Pin } from "@/types/audit";
 import { Pin as PinIcon, Trash2, X, CornerDownRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -372,15 +375,15 @@ export function AuditViewer({
     }
   }, [selectedPinIndex, allPins.length]);
 
-  const handleSavePin = useCallback(async (pin: Pin) => {
-    setIsInputOpen(false);
-    setClickPosition(null);
-    setAnchorPosition(null);
+  const handleSavePin = useCallback(async (pin: Pin, audio?: PendingAudioAttachment) => {
     try {
+      const formData = new FormData();
+      formData.append("pin", JSON.stringify(pin));
+      if (audio) formData.append("audio", audio.blob, audio.filename);
+
       const response = await fetch(`/audit/${auditId}/add-pin`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pin),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -396,11 +399,16 @@ export function AuditViewer({
 
       onPinAdded?.(pin);
 
+      setIsInputOpen(false);
+      setClickPosition(null);
+      setAnchorPosition(null);
+
       window.location.reload();
     } catch (error) {
       console.error("Error saving pin:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to save pin. Please try again.";
-      alert(errorMessage);
+      throw error instanceof Error
+        ? error
+        : new Error("Failed to save pin. Please try again.");
     }
   }, [auditId, onPinAdded]);
 

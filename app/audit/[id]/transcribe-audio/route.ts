@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@vercel/blob";
-import { v4 } from "uuid";
 import { getCurrentUser } from "@/lib/auth";
 import { canViewAudit } from "@/lib/audits";
+import { getAudioFileMetadata, MAX_AUDIO_BYTES } from "@/lib/audio-blobs";
 
 export const maxDuration = 60;
 
@@ -34,14 +33,6 @@ export async function POST(
       );
     }
 
-    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!blobToken) {
-      return NextResponse.json(
-        { error: "BLOB_READ_WRITE_TOKEN is not configured on the server" },
-        { status: 500 }
-      );
-    }
-
     // Parse multipart form
     const formData = await request.formData();
     const entry = formData.get("audio");
@@ -50,72 +41,42 @@ export async function POST(
     }
     const audioFile = entry as File;
 
-    if (audioFile.size > 10 * 1024 * 1024) {
+    if (audioFile.size > MAX_AUDIO_BYTES) {
       return NextResponse.json({ error: "Audio file too large (max 10 MB)" }, { status: 413 });
     }
-
-    // Determine extension for blob filename
-    const rawMime = audioFile.type || "audio/webm";
-    const baseMime = rawMime.split(";")[0].trim();
-    const ext = baseMime.includes("ogg")
-      ? "ogg"
-      : baseMime.includes("mp4") || baseMime.includes("m4a")
-      ? "m4a"
-      : baseMime.includes("wav")
-      ? "wav"
-      : "webm";
-
-    // Run blob upload and ElevenLabs transcription in parallel
-    const [blobResult, transcriptResult] = await Promise.allSettled([
-      // 1. Upload audio to Vercel Blob
-      put(`audio-pins/${v4()}.${ext}`, audioFile, {
-        access: "public",
-        contentType: baseMime,
-        token: blobToken,
-      }),
-
-      // 2. Transcribe with ElevenLabs Scribe
-      (async () => {
-        const elevenForm = new FormData();
-        elevenForm.append("file", audioFile);
-        elevenForm.append("model_id", "scribe_v1");
-
-        const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
-          method: "POST",
-          headers: { "xi-api-key": elevenLabsKey },
-          body: elevenForm,
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`ElevenLabs ${res.status}: ${errText}`);
-        }
-
-        const data = await res.json() as { text: string };
-        return data.text.trim();
-      })(),
-    ]);
-
-    if (blobResult.status === "rejected") {
-      console.error("[transcribe-audio] Blob upload failed:", blobResult.reason);
-      return NextResponse.json(
-        { error: `Failed to upload audio: ${String(blobResult.reason)}` },
-        { status: 500 }
-      );
+    if (audioFile.size <= 0) {
+      return NextResponse.json({ error: "Audio file is empty" }, { status: 400 });
     }
 
-    const audioUrl = blobResult.value.url;
+    // Validate the media type here as well as at final submission. The audio
+    // remains only in browser memory until the pin is actually submitted.
+    getAudioFileMetadata(audioFile);
 
-    if (transcriptResult.status === "rejected") {
-      console.error("[transcribe-audio] ElevenLabs transcription failed:", transcriptResult.reason);
+    const elevenForm = new FormData();
+    elevenForm.append("file", audioFile);
+    elevenForm.append("model_id", "scribe_v1");
+
+    const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+      method: "POST",
+      headers: { "xi-api-key": elevenLabsKey },
+      body: elevenForm,
+      signal: request.signal,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[transcribe-audio] ElevenLabs transcription failed:", {
+        status: res.status,
+        error: errText,
+      });
       return NextResponse.json({
-        audioUrl,
         transcript: "",
         error: "Transcription failed — please type your comment",
       });
     }
 
-    return NextResponse.json({ audioUrl, transcript: transcriptResult.value });
+    const data = (await res.json()) as { text: string };
+    return NextResponse.json({ transcript: data.text.trim() });
   } catch (err) {
     console.error("[transcribe-audio] Unexpected error:", err);
     return NextResponse.json(

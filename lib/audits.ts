@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "./db";
 import type { Pin, PinReply } from "@/types/audit";
 import type { Audit as PrismaAudit } from "@prisma/client";
+import { deletePinAudio, deletePinAudioForPins } from "@/lib/audio-blobs";
 
 /** Assign UUIDs to pins missing `id`; persist via getAuditById when changed. */
 export function ensurePinIds(pins: Pin[]): { pins: Pin[]; changed: boolean } {
@@ -67,6 +68,8 @@ export async function deletePinById(auditId: string, pinId: string): Promise<voi
   const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
   const loc = findPinLocation(aiPins, userPins, pinId);
   if (!loc) throw new Error("Pin not found");
+  const deletedPin = loc.bucket === "pins" ? aiPins[loc.index] : userPins[loc.index];
+  await deletePinAudio(auditId, deletedPin.audioUrl);
   if (loc.bucket === "pins") {
     const next = aiPins.filter((_, i) => i !== loc.index);
     await prisma.audit.update({
@@ -336,15 +339,40 @@ export async function unarchiveAudit(id: string, userId: string) {
 }
 
 export async function deleteAudit(id: string, userId: string) {
-  const audit = await prisma.audit.findUnique({ where: { id } });
+  let audit = await prisma.audit.findUnique({ where: { id } });
   if (!audit) throw new Error("Audit not found");
-  const createdById = (audit as AuditOwnerFields).createdById;
-  if (createdById != null && createdById !== userId) {
+  if ((audit as AuditOwnerFields).createdById != null && audit.createdById !== userId) {
     throw new Error("Only the owner can delete this audit");
   }
-  await prisma.audit.delete({
-    where: { id },
-  });
+
+  // Compare-and-delete prevents a pin submitted concurrently with audit
+  // deletion from creating an audio object that was not in our cleanup set.
+  // The add-pin route rolls its upload back if the audit disappears first.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const aiPins = JSON.parse(audit.pinsJson) as Pin[];
+    const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
+    // As with single-pin deletion, fail the operation if Blob cleanup still
+    // fails after its bounded retries. This preserves a retryable DB reference.
+    await deletePinAudioForPins(id, [...aiPins, ...userPins]);
+
+    const deleted = await prisma.audit.deleteMany({
+      where: {
+        id,
+        pinsJson: audit.pinsJson,
+        userPinsJson: audit.userPinsJson,
+      },
+    });
+    if (deleted.count === 1) return;
+
+    const latest = await prisma.audit.findUnique({ where: { id } });
+    if (!latest) return;
+    if ((latest as AuditOwnerFields).createdById != null && latest.createdById !== userId) {
+      throw new Error("Only the owner can delete this audit");
+    }
+    audit = latest;
+  }
+
+  throw new Error("Audit changed while being deleted; please retry");
 }
 
 export async function getAuditsCreatedByMe(userId: string): Promise<AuditListItem[]> {

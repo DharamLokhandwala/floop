@@ -1,7 +1,11 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { InlineCommentInput, type PendingLiveClick } from "@/components/InlineCommentInput";
+import {
+  InlineCommentInput,
+  type PendingAudioAttachment,
+  type PendingLiveClick,
+} from "@/components/InlineCommentInput";
 import { getViewerOrigin } from "@/lib/viewer-origin";
 import type { Pin } from "@/types/audit";
 
@@ -59,7 +63,7 @@ interface LiveAuditViewProps {
   highlightPinIndexInPage?: number | null;
   /** Called after we've sent HIGHLIGHT so parent can clear selection (one-time, not sticky) */
   onHighlightDone?: () => void;
-  onSavePin: (pin: Pin) => Promise<void>;
+  onSavePin: (pin: Pin, audio?: PendingAudioAttachment) => Promise<void>;
   /** Called after a pin is saved successfully (e.g. to refresh sidebar). No full page reload. */
   onPinSaved?: () => void;
   /** Current path from URL so we can stay on this page after reload */
@@ -317,13 +321,13 @@ export function LiveAuditView({
     }
   }, [postToIframe, onHighlightDone]);
 
-  const handleSavePin = useCallback(async (pin: Pin) => {
+  const handleSavePin = useCallback(async (pin: Pin, audio?: PendingAudioAttachment) => {
+    await onSavePin(pin, audio);
     setPendingClick(null);
     setModalOpen(false);
     setAnchorPosition(null);
     // Add optimistically so hotspot appears immediately
     setOptimisticPins((prev) => [...prev, pin]);
-    await onSavePin(pin);
     onPinSaved?.();
   }, [onSavePin, onPinSaved]);
 

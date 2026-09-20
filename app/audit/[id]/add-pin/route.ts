@@ -1,9 +1,17 @@
 import { randomUUID } from "crypto";
-import { addUserPin as addPinToDb, canViewAudit } from "@/lib/audits";
+import {
+  addUserPin as addPinToDb,
+  canViewAudit,
+} from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import type { Pin } from "@/types/audit";
+import { deletePinAudio, uploadPinAudio } from "@/lib/audio-blobs";
+
+type AddPinBody = Partial<Pin> & Record<string, unknown>;
+
+export const maxDuration = 60;
 
 export async function POST(
   request: NextRequest,
@@ -23,14 +31,54 @@ export async function POST(
     );
   }
   try {
-    const body = await request.json();
+    let body: AddPinBody;
+    let audioFile: File | null = null;
+    let uploadedAudioPathname: string | null = null;
+    const contentType = request.headers.get("content-type") ?? "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const pinJson = formData.get("pin");
+      if (typeof pinJson !== "string") {
+        return NextResponse.json({ error: "Pin data is required" }, { status: 400 });
+      }
+      const parsed = JSON.parse(pinJson) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return NextResponse.json({ error: "Invalid pin data" }, { status: 400 });
+      }
+      body = parsed as AddPinBody;
+      const audioEntry = formData.get("audio");
+      if (audioEntry && typeof audioEntry !== "string") {
+        audioFile = audioEntry as File;
+      }
+    } else {
+      const parsed = (await request.json()) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return NextResponse.json({ error: "Invalid pin data" }, { status: 400 });
+      }
+      body = parsed as AddPinBody;
+    }
+
+    if (
+      typeof body.x !== "number" ||
+      !Number.isFinite(body.x) ||
+      typeof body.y !== "number" ||
+      !Number.isFinite(body.y) ||
+      typeof body.feedback !== "string" ||
+      !body.feedback.trim()
+    ) {
+      return NextResponse.json(
+        { error: "Invalid pin data: x, y, and feedback required" },
+        { status: 400 }
+      );
+    }
 
     const pin: Pin = {
       id: randomUUID(),
       x: body.x,
       y: body.y,
       category: body.category ?? "Feedback",
-      feedback: body.feedback,
+      feedback: body.feedback.trim(),
       pageUrl: body.pageUrl,
       selector: body.selector,
       viewportWidth: body.viewportWidth,
@@ -39,19 +87,13 @@ export async function POST(
       scrollY: body.scrollY,
       docX: body.docX,
       docY: body.docY,
-      ...(body.audioUrl ? { audioUrl: body.audioUrl } : {}),
       ...(user ? { authorId: user.id, authorName: user.name || user.email || undefined } : {}),
     };
 
-    if (
-      typeof pin.x !== "number" ||
-      typeof pin.y !== "number" ||
-      !pin.feedback
-    ) {
-      return NextResponse.json(
-        { error: "Invalid pin data: x, y, and feedback required" },
-        { status: 400 }
-      );
+    if (audioFile) {
+      const uploaded = await uploadPinAudio(id, audioFile);
+      pin.audioUrl = uploaded.audioUrl;
+      uploadedAudioPathname = uploaded.pathname;
     }
 
     // Optional: capture screenshot for this comment (Workflow-style). Commented out — slows submit and is not core flow.
@@ -67,7 +109,22 @@ export async function POST(
     //   }
     // }
 
-    await addPinToDb(id, pin);
+    try {
+      await addPinToDb(id, pin);
+    } catch (error) {
+      if (pin.audioUrl) {
+        try {
+          await deletePinAudio(id, pin.audioUrl);
+        } catch (cleanupError) {
+          console.error("[add-pin] Failed to roll back uploaded audio", {
+            auditId: id,
+            pathname: uploadedAudioPathname,
+            cleanupError,
+          });
+        }
+      }
+      throw error;
+    }
     revalidatePath(`/audit/${id}`);
 
     return NextResponse.json({ success: true });

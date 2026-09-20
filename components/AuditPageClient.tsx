@@ -53,6 +53,7 @@ import { ShareModal } from "@/components/ShareModal";
 import { ShareFeedbackLinkModal } from "@/components/ShareFeedbackLinkModal";
 import { FloopTipModal } from "@/components/FloopTipModal";
 import type { Pin } from "@/types/audit";
+import type { PendingAudioAttachment } from "@/components/InlineCommentInput";
 
 interface AuditPageClientProps {
   auditId: string;
@@ -201,11 +202,14 @@ export function AuditPageClient({
   }, [auditId, router, searchParams]);
 
   const handleSavePin = useCallback(
-    async (pin: Pin) => {
+    async (pin: Pin, audio?: PendingAudioAttachment) => {
+      const formData = new FormData();
+      formData.append("pin", JSON.stringify(pin));
+      if (audio) formData.append("audio", audio.blob, audio.filename);
+
       const res = await fetch(`/audit/${auditId}/add-pin`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pin),
+        body: formData,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

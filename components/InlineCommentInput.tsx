@@ -17,6 +17,11 @@ export type PendingLiveClick = {
   docY?: number;
 };
 
+export type PendingAudioAttachment = {
+  blob: Blob;
+  filename: string;
+};
+
 interface InlineCommentInputProps {
   /** Whether the inline input is visible */
   open: boolean;
@@ -27,7 +32,7 @@ interface InlineCommentInputProps {
   /** Audit ID used for the transcribe-audio API route */
   auditId: string;
   /** Called when user submits the comment */
-  onSave: (pin: Pin) => void;
+  onSave: (pin: Pin, audio?: PendingAudioAttachment) => Promise<void>;
   /** Called when the user dismisses (clicks away, presses Escape) */
   onDismiss: () => void;
 }
@@ -47,9 +52,10 @@ export function InlineCommentInput({
   onDismiss,
 }: InlineCommentInputProps) {
   const [feedback, setFeedback] = useState("");
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioAttachment, setAudioAttachment] = useState<PendingAudioAttachment | null>(null);
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [micError, setMicError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -60,20 +66,37 @@ export function InlineCommentInput({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const waveformBarsRef = useRef<(HTMLSpanElement | null)[]>([]);
+  const discardRecordingRef = useRef(false);
+  const transcriptionAbortRef = useRef<AbortController | null>(null);
 
   // Reset all state when opened/closed
   useEffect(() => {
     if (open) {
+      discardRecordingRef.current = false;
       setFeedback("");
-      setAudioUrl(null);
+      setAudioAttachment(null);
       setRecordingState("idle");
       setMicError(null);
+      setSubmitting(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {
-      stopStream();
+      discardRecordingRef.current = true;
+      transcriptionAbortRef.current?.abort();
+      transcriptionAbortRef.current = null;
+      stopStream(true);
+      setAudioAttachment(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      discardRecordingRef.current = true;
+      transcriptionAbortRef.current?.abort();
+      stopStream(true);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function stopWaveformLoop() {
     if (animFrameRef.current !== null) {
@@ -89,10 +112,15 @@ export function InlineCommentInput({
     });
   }
 
-  function stopStream() {
+  function stopStream(discard = false) {
     stopWaveformLoop();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      try { mediaRecorderRef.current.stop(); } catch { /* ignored */ }
+    const recorder = mediaRecorderRef.current;
+    if (discard && recorder) {
+      discardRecordingRef.current = true;
+      recorder.onstop = null;
+    }
+    if (recorder && recorder.state !== "inactive") {
+      try { recorder.stop(); } catch { /* ignored */ }
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -157,8 +185,8 @@ export function InlineCommentInput({
     return () => document.removeEventListener("keydown", handler);
   }, [open, onDismiss]);
 
-  const handleSubmit = useCallback(() => {
-    if (!feedback.trim() || !pendingClick) return;
+  const handleSubmit = useCallback(async () => {
+    if (!feedback.trim() || !pendingClick || submitting) return;
 
     const pin: Pin = {
       x: pendingClick.x,
@@ -174,18 +202,24 @@ export function InlineCommentInput({
     if (typeof pendingClick.scrollY === "number") pin.scrollY = pendingClick.scrollY;
     if (typeof pendingClick.docX === "number") pin.docX = pendingClick.docX;
     if (typeof pendingClick.docY === "number") pin.docY = pendingClick.docY;
-    if (audioUrl) pin.audioUrl = audioUrl;
-
-    onSave(pin);
-    setFeedback("");
-    setAudioUrl(null);
-  }, [feedback, audioUrl, pendingClick, onSave]);
+    setSubmitting(true);
+    setMicError(null);
+    try {
+      await onSave(pin, audioAttachment ?? undefined);
+      setFeedback("");
+      setAudioAttachment(null);
+    } catch (error) {
+      setMicError(error instanceof Error ? error.message : "Failed to save comment");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [feedback, audioAttachment, pendingClick, onSave, submitting]);
 
   const handleMicClick = useCallback(async () => {
     setMicError(null);
 
     if (recordingState === "recording") {
-      // Stop recording — onstop handler will do the upload+transcribe
+      // Stop recording — onstop keeps the audio in memory and transcribes it.
       mediaRecorderRef.current?.stop();
       return;
     }
@@ -193,7 +227,13 @@ export function InlineCommentInput({
     if (recordingState !== "idle") return;
 
     try {
+      discardRecordingRef.current = false;
+      setAudioAttachment(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (discardRecordingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       chunksRef.current = [];
 
@@ -213,29 +253,56 @@ export function InlineCommentInput({
         stream.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
 
+        if (discardRecordingRef.current) {
+          chunksRef.current = [];
+          return;
+        }
+
         const audioBlob = new Blob(chunksRef.current, {
           type: mimeType || "audio/webm",
         });
         chunksRef.current = [];
 
+        if (!audioBlob.size) {
+          setMicError("Recording was empty");
+          setRecordingState("idle");
+          mediaRecorderRef.current = null;
+          return;
+        }
+
+        const extension = mimeType.includes("ogg")
+          ? "ogg"
+          : mimeType.includes("mp4")
+          ? "m4a"
+          : "webm";
+        setAudioAttachment({
+          blob: audioBlob,
+          filename: `recording.${extension}`,
+        });
+
         setRecordingState("transcribing");
 
         try {
           const formData = new FormData();
-          formData.append("audio", audioBlob, `recording.${mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "m4a" : "webm"}`);
+          formData.append("audio", audioBlob, `recording.${extension}`);
+
+          const controller = new AbortController();
+          transcriptionAbortRef.current = controller;
 
           const res = await fetch(`/audit/${auditId}/transcribe-audio`, {
             method: "POST",
             body: formData,
+            signal: controller.signal,
           });
 
           const data = await res.json();
+
+          if (discardRecordingRef.current) return;
 
           if (!res.ok) {
             throw new Error(data.error || "Transcription failed");
           }
 
-          if (data.audioUrl) setAudioUrl(data.audioUrl);
           if (data.transcript) {
             setFeedback(data.transcript);
             // Re-focus textarea so user can edit
@@ -251,9 +318,12 @@ export function InlineCommentInput({
             setMicError(data.error);
           }
         } catch (err) {
-          setMicError(err instanceof Error ? err.message : "Transcription failed");
+          if (!discardRecordingRef.current && !(err instanceof Error && err.name === "AbortError")) {
+            setMicError(err instanceof Error ? err.message : "Transcription failed");
+          }
         } finally {
-          setRecordingState("idle");
+          transcriptionAbortRef.current = null;
+          if (!discardRecordingRef.current) setRecordingState("idle");
           mediaRecorderRef.current = null;
         }
       };
@@ -285,7 +355,7 @@ export function InlineCommentInput({
 
   const isRecording = recordingState === "recording";
   const isTranscribing = recordingState === "transcribing";
-  const isBusy = isRecording || isTranscribing;
+  const isBusy = isRecording || isTranscribing || submitting;
 
   return (
     <>
@@ -373,11 +443,11 @@ export function InlineCommentInput({
                 ref={inputRef}
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
-                disabled={isTranscribing}
+                disabled={isTranscribing || submitting}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    handleSubmit();
+                    void handleSubmit();
                   }
                 }}
                 placeholder={isTranscribing ? "Transcribing…" : "Add a comment…"}
@@ -408,7 +478,7 @@ export function InlineCommentInput({
             {/* Mic / stop / spinner button */}
             <button
               onClick={handleMicClick}
-              disabled={isTranscribing}
+              disabled={isTranscribing || submitting}
               title={isRecording ? "Stop recording" : "Record voice comment"}
               style={{
                 width: 32,
@@ -437,7 +507,7 @@ export function InlineCommentInput({
 
             {/* Send button */}
             <button
-              onClick={handleSubmit}
+              onClick={() => void handleSubmit()}
               disabled={!feedback.trim() || isBusy}
               style={{
                 width: 32,
@@ -473,7 +543,7 @@ export function InlineCommentInput({
           )}
 
           {/* Audio attached badge */}
-          {audioUrl && !isTranscribing && (
+          {audioAttachment && !isTranscribing && (
             <div
               style={{
                 fontSize: 11,
