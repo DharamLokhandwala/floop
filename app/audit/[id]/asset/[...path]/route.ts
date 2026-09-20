@@ -1,5 +1,6 @@
 import { canViewAudit, getAuditById } from "@/lib/audits";
 import { verifyAuditViewerAccessToken } from "@/lib/audit-viewer-access";
+import { ssrfSafeFetch, SsrfBlockedError } from "@/lib/ssrf";
 import { getViewerOriginContext } from "@/lib/viewer-origin-server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -76,24 +77,29 @@ export async function GET(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
 
-    const upstream = await fetch(targetUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: request.headers.get("accept") ?? "*/*",
-        "Accept-Encoding": "identity",
-        Referer: auditOrigin + "/",
-        "Sec-Ch-Ua":
-          '"Chromium";v="124", "Google Chrome";v="124", "Not_A Brand";v="24"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    const upstream = await (async () => {
+      try {
+        return await ssrfSafeFetch(targetUrl, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            Accept: request.headers.get("accept") ?? "*/*",
+            "Accept-Encoding": "identity",
+            Referer: auditOrigin + "/",
+            "Sec-Ch-Ua":
+              '"Chromium";v="124", "Google Chrome";v="124", "Not_A Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+          },
+          maxRedirects: 10,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+    })();
 
     if (!upstream.ok) {
       return new NextResponse(null, { status: upstream.status });
@@ -105,9 +111,8 @@ export async function GET(
 
     const isCSS = contentType.includes("text/css");
     if (isCSS) {
-      const body = await upstream.arrayBuffer();
       const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset/${encodeURIComponent(viewerToken)}`;
-      let css = new TextDecoder().decode(body);
+      let css = upstream.body.toString("utf8");
       css = rewriteCssUrls(css, auditOrigin, assetBase);
       return new NextResponse(css, {
         headers: {
@@ -127,11 +132,14 @@ export async function GET(
     if (upstream.headers.get("content-length")) {
       streamHeaders["Content-Length"] = upstream.headers.get("content-length")!;
     }
-    return new NextResponse(upstream.body ?? undefined, {
+    return new NextResponse(new Uint8Array(upstream.body), {
       headers: streamHeaders,
     });
   } catch (err) {
     console.error("Asset proxy error:", targetUrl, err);
+    if (err instanceof SsrfBlockedError) {
+      return new NextResponse("Target URL is not publicly routable", { status: 403 });
+    }
     return new NextResponse(null, { status: 502 });
   }
 }

@@ -1,6 +1,7 @@
 import { canViewAudit, getAuditById } from "@/lib/audits";
 import { verifyAuditViewerAccessToken } from "@/lib/audit-viewer-access";
 import { getViewerOriginContext } from "@/lib/viewer-origin-server";
+import { ssrfSafeFetch, SsrfBlockedError } from "@/lib/ssrf";
 import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_PROTOCOLS = ["https:", "http:"];
@@ -80,31 +81,33 @@ export async function GET(
       "Sec-Fetch-User": "?1",
       "Upgrade-Insecure-Requests": "1",
     },
-    redirect: "follow" as RequestRedirect,
   };
 
   let html: string;
-  const doFetch = async (signal: AbortSignal) => {
-    const res = await fetch(targetUrl.href, { ...fetchOptions, signal });
-    if (!res.ok) return { ok: false as const, status: res.status };
-    const text = await res.text();
-    return { ok: true as const, html: text };
+  const doFetch = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    try {
+      const res = await ssrfSafeFetch(targetUrl, {
+        ...fetchOptions,
+        maxRedirects: 10,
+        signal: controller.signal,
+      });
+      if (!res.ok) return { ok: false as const, status: res.status };
+      return { ok: true as const, html: res.body.toString("utf8") };
+    } finally {
+      clearTimeout(timeout);
+    }
   };
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45_000);
-    let result = await doFetch(controller.signal);
-    clearTimeout(timeout);
+    let result = await doFetch();
 
     if (!result.ok) {
       const retryable = [403, 503, 502, 429].includes(result.status);
       if (retryable) {
         await new Promise((r) => setTimeout(r, 2000));
-        const c2 = new AbortController();
-        const t2 = setTimeout(() => c2.abort(), 45_000);
-        result = await doFetch(c2.signal);
-        clearTimeout(t2);
+        result = await doFetch();
       }
       if (!result.ok) {
         return new NextResponse(
@@ -116,6 +119,9 @@ export async function GET(
     html = result.ok ? result.html : "";
   } catch (err) {
     console.error("Proxy fetch error:", targetUrl.href, err);
+    if (err instanceof SsrfBlockedError) {
+      return new NextResponse("Target URL is not publicly routable", { status: 403 });
+    }
     const message =
       err instanceof Error && err.name === "AbortError"
         ? "Page took too long to respond"
