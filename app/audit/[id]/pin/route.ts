@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { deletePinById, getAuditById } from "@/lib/audits";
+import {
+  deletePinById,
+  getAuditById,
+  isAuditPinConflictError,
+} from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 
 type AuditRow = { createdById?: string | null };
@@ -20,7 +24,17 @@ export async function DELETE(
     return NextResponse.json({ error: "pinId query parameter required" }, { status: 400 });
   }
 
-  const audit = await getAuditById(auditId);
+  let audit;
+  try {
+    audit = await getAuditById(auditId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to load audit";
+    if (isAuditPinConflictError(error)) {
+      return NextResponse.json({ error: message }, { status: 409 });
+    }
+    console.error("[pin DELETE] Failed to load audit", error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
   if (!audit) {
     return NextResponse.json({ error: "Audit not found" }, { status: 404 });
   }
@@ -44,6 +58,9 @@ export async function DELETE(
     const msg = err instanceof Error ? err.message : "Failed to delete pin";
     if (msg === "Pin not found") {
       return NextResponse.json({ error: msg }, { status: 404 });
+    }
+    if (isAuditPinConflictError(err)) {
+      return NextResponse.json({ error: msg }, { status: 409 });
     }
     console.error("[pin DELETE]", err);
     return NextResponse.json({ error: msg }, { status: 500 });

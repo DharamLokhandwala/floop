@@ -2,12 +2,14 @@ import { randomUUID } from "crypto";
 import {
   addUserPin as addPinToDb,
   canViewAudit,
+  isAuditPinConflictError,
 } from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import type { Pin } from "@/types/audit";
 import { deletePinAudio, uploadPinAudio } from "@/lib/audio-blobs";
+import { validate as isUuid } from "uuid";
 
 type AddPinBody = Partial<Pin> & Record<string, unknown>;
 
@@ -73,8 +75,15 @@ export async function POST(
       );
     }
 
+    if (
+      body.id !== undefined &&
+      (typeof body.id !== "string" || !isUuid(body.id.trim()))
+    ) {
+      return NextResponse.json({ error: "Invalid pin ID" }, { status: 400 });
+    }
+
     const pin: Pin = {
-      id: randomUUID(),
+      id: typeof body.id === "string" ? body.id.trim() : randomUUID(),
       x: body.x,
       y: body.y,
       category: body.category ?? "Feedback",
@@ -110,7 +119,12 @@ export async function POST(
     // }
 
     try {
-      await addPinToDb(id, pin);
+      const result = await addPinToDb(id, pin);
+      if (!result.created && pin.audioUrl) {
+        // The original request already committed this ID. Discard the new
+        // upload produced by this replay instead of leaking an orphan Blob.
+        await deletePinAudio(id, pin.audioUrl);
+      }
     } catch (error) {
       if (pin.audioUrl) {
         try {
@@ -127,7 +141,7 @@ export async function POST(
     }
     revalidatePath(`/audit/${id}`);
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, pinId: pin.id });
   } catch (error) {
     console.error("Error adding pin:", error);
     return NextResponse.json(
@@ -135,7 +149,7 @@ export async function POST(
         error: error instanceof Error ? error.message : "Failed to add pin",
         details: error instanceof Error ? error.stack : undefined,
       },
-      { status: 500 }
+      { status: isAuditPinConflictError(error) ? 409 : 500 }
     );
   }
 }

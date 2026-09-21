@@ -93,11 +93,13 @@ function PinThreadPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [isReplying, setIsReplying] = useState(false);
+  const pendingReplyRef = useRef<{ id: string; body: string } | null>(null);
 
   useEffect(() => {
     setIsReplying(false);
     setReplyBody("");
     setErr(null);
+    pendingReplyRef.current = null;
   }, [pin.id]);
 
   useEffect(() => {
@@ -125,14 +127,22 @@ function PinThreadPanel({
     setErr(null);
     setBusy(true);
     try {
+      if (!pendingReplyRef.current || pendingReplyRef.current.body !== body) {
+        pendingReplyRef.current = { id: crypto.randomUUID(), body };
+      }
       const res = await fetch(`/audit/${auditId}/pin/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ pinId: pin.id, body }),
+        body: JSON.stringify({
+          pinId: pin.id,
+          replyId: pendingReplyRef.current.id,
+          body,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to send reply");
+      pendingReplyRef.current = null;
       setReplyBody("");
       onMutated();
     } catch (e) {

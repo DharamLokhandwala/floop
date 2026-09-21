@@ -2,7 +2,17 @@ import { randomUUID } from "crypto";
 import { prisma } from "./db";
 import type { Pin, PinReply } from "@/types/audit";
 import type { Audit as PrismaAudit } from "@prisma/client";
-import { deletePinAudio, deletePinAudioForPins } from "@/lib/audio-blobs";
+import { deletePinAudio, deletePinAudioForPins } from "./audio-blobs";
+import {
+  AuditPinConflictError,
+  mutateJsonArrayWithRetry,
+  type JsonArrayMutation,
+} from "./json-array-cas";
+
+export {
+  AuditPinConflictError,
+  isAuditPinConflictError,
+} from "./json-array-cas";
 
 /** Assign UUIDs to pins missing `id`; persist via getAuditById when changed. */
 export function ensurePinIds(pins: Pin[]): { pins: Pin[]; changed: boolean } {
@@ -29,60 +39,166 @@ export function findPinLocation(
   return null;
 }
 
+type PinJsonColumn = "pinsJson" | "userPinsJson";
+
+function parsePinArray(raw: string | null): Pin[] {
+  const parsed = JSON.parse(raw ?? "[]") as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("Stored pin data is not a JSON array");
+  }
+  return parsed as Pin[];
+}
+
+function columnForBucket(bucket: PinBucket): PinJsonColumn {
+  return bucket === "pins" ? "pinsJson" : "userPinsJson";
+}
+
+async function readPinColumn(
+  auditId: string,
+  column: PinJsonColumn
+): Promise<{ raw: string | null } | null> {
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    select: { pinsJson: true, userPinsJson: true },
+  });
+  if (!audit) return null;
+  return { raw: column === "pinsJson" ? audit.pinsJson : audit.userPinsJson };
+}
+
+async function compareAndSwapPinColumn(
+  auditId: string,
+  column: PinJsonColumn,
+  expectedRaw: string | null,
+  nextRaw: string
+): Promise<boolean> {
+  if (column === "pinsJson") {
+    if (expectedRaw === null) return false;
+    const updated = await prisma.audit.updateMany({
+      where: { id: auditId, pinsJson: expectedRaw },
+      data: { pinsJson: nextRaw },
+    });
+    return updated.count === 1;
+  }
+
+  const updated = await prisma.audit.updateMany({
+    where: { id: auditId, userPinsJson: expectedRaw },
+    data: { userPinsJson: nextRaw },
+  });
+  return updated.count === 1;
+}
+
+async function mutatePinColumn<Result>(
+  auditId: string,
+  column: PinJsonColumn,
+  operation: string,
+  mutate: (
+    pins: Pin[],
+    context: { attempt: number }
+  ) => JsonArrayMutation<Pin, Result>,
+  options?: {
+    initialRaw?: string | null;
+    beforeCompareAndSwap?: (result: Result) => Promise<void>;
+  }
+): Promise<Result> {
+  return mutateJsonArrayWithRetry({
+    operation,
+    read: () => readPinColumn(auditId, column),
+    compareAndSwap: (expectedRaw, nextRaw) =>
+      compareAndSwapPinColumn(auditId, column, expectedRaw, nextRaw),
+    mutate,
+    ...(
+      options && Object.prototype.hasOwnProperty.call(options, "initialRaw")
+        ? { initialSnapshot: { raw: options.initialRaw ?? null } }
+        : {}
+    ),
+    beforeCompareAndSwap: options?.beforeCompareAndSwap
+      ? ({ result }) => options.beforeCompareAndSwap!(result)
+      : undefined,
+    onConflict: (attempt, maxAttempts) => {
+      console.warn("[audit-pin-cas] Conditional update lost a race", {
+        auditId,
+        column,
+        operation,
+        attempt,
+        maxAttempts,
+      });
+    },
+  });
+}
+
+async function getPinBucket(
+  auditId: string,
+  pinId: string
+): Promise<PinBucket | null> {
+  const audit = await prisma.audit.findUnique({
+    where: { id: auditId },
+    select: { pinsJson: true, userPinsJson: true },
+  });
+  if (!audit) throw new Error("Audit not found");
+  return findPinLocation(
+    parsePinArray(audit.pinsJson),
+    parsePinArray(audit.userPinsJson),
+    pinId
+  )?.bucket ?? null;
+}
+
 export async function appendPinReply(
   auditId: string,
   pinId: string,
   reply: PinReply
 ): Promise<void> {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
-  if (!audit) throw new Error("Audit not found");
-  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
-  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
-  const loc = findPinLocation(aiPins, userPins, pinId);
-  if (!loc) throw new Error("Pin not found");
-  if (loc.bucket === "pins") {
-    const next = [...aiPins];
-    const pin = { ...next[loc.index] };
-    pin.replies = [...(pin.replies ?? []), reply];
-    next[loc.index] = pin;
-    await prisma.audit.update({
-      where: { id: auditId },
-      data: { pinsJson: JSON.stringify(next) },
-    });
-  } else {
-    const next = [...userPins];
-    const pin = { ...next[loc.index] };
-    pin.replies = [...(pin.replies ?? []), reply];
-    next[loc.index] = pin;
-    await prisma.audit.update({
-      where: { id: auditId },
-      data: { userPinsJson: JSON.stringify(next) },
-    });
-  }
+  const bucket = await getPinBucket(auditId, pinId);
+  if (!bucket) throw new Error("Pin not found");
+
+  await mutatePinColumn(
+    auditId,
+    columnForBucket(bucket),
+    "add pin reply",
+    (pins) => {
+      const index = pins.findIndex((pin) => pin.id === pinId);
+      if (index < 0) {
+        throw new AuditPinConflictError("Pin changed while adding a reply; please retry");
+      }
+      const existingReplies = pins[index].replies ?? [];
+      if (existingReplies.some((candidate) => candidate.id === reply.id)) {
+        return { kind: "noop", result: undefined };
+      }
+      const next = [...pins];
+      next[index] = {
+        ...next[index],
+        replies: [...existingReplies, reply],
+      };
+      return { kind: "write", next, result: undefined };
+    }
+  );
 }
 
 export async function deletePinById(auditId: string, pinId: string): Promise<void> {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
-  if (!audit) throw new Error("Audit not found");
-  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
-  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
-  const loc = findPinLocation(aiPins, userPins, pinId);
-  if (!loc) throw new Error("Pin not found");
-  const deletedPin = loc.bucket === "pins" ? aiPins[loc.index] : userPins[loc.index];
-  await deletePinAudio(auditId, deletedPin.audioUrl);
-  if (loc.bucket === "pins") {
-    const next = aiPins.filter((_, i) => i !== loc.index);
-    await prisma.audit.update({
-      where: { id: auditId },
-      data: { pinsJson: JSON.stringify(next) },
-    });
-  } else {
-    const next = userPins.filter((_, i) => i !== loc.index);
-    await prisma.audit.update({
-      where: { id: auditId },
-      data: { userPinsJson: JSON.stringify(next) },
-    });
-  }
+  const bucket = await getPinBucket(auditId, pinId);
+  // Repeating a successful delete is an idempotent no-op.
+  if (!bucket) return;
+
+  await mutatePinColumn<Pin | null>(
+    auditId,
+    columnForBucket(bucket),
+    "delete pin",
+    (pins) => {
+      const index = pins.findIndex((pin) => pin.id === pinId);
+      if (index < 0) return { kind: "noop", result: null };
+      return {
+        kind: "write",
+        next: pins.filter((_, candidateIndex) => candidateIndex !== index),
+        result: pins[index],
+      };
+    },
+    {
+      // Preserve fix 5's ordering: Blob cleanup is awaited before the database
+      // reference is removed. A lost CAS retries against the fresh pin array.
+      beforeCompareAndSwap: async (pin) => {
+        if (pin) await deletePinAudio(auditId, pin.audioUrl);
+      },
+    }
+  );
 }
 
 export async function updatePinFeedback(
@@ -90,30 +206,26 @@ export async function updatePinFeedback(
   pinId: string,
   newFeedback: string
 ): Promise<Pin> {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
-  if (!audit) throw new Error("Audit not found");
-  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
-  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
-  const loc = findPinLocation(aiPins, userPins, pinId);
-  if (!loc) throw new Error("Pin not found");
-  
-  if (loc.bucket === "pins") {
-    const next = [...aiPins];
-    next[loc.index] = { ...next[loc.index], feedback: newFeedback };
-    await prisma.audit.update({
-      where: { id: auditId },
-      data: { pinsJson: JSON.stringify(next) },
-    });
-    return next[loc.index];
-  } else {
-    const next = [...userPins];
-    next[loc.index] = { ...next[loc.index], feedback: newFeedback };
-    await prisma.audit.update({
-      where: { id: auditId },
-      data: { userPinsJson: JSON.stringify(next) },
-    });
-    return next[loc.index];
-  }
+  const bucket = await getPinBucket(auditId, pinId);
+  if (!bucket) throw new Error("Pin not found");
+
+  return mutatePinColumn<Pin>(
+    auditId,
+    columnForBucket(bucket),
+    "update pin feedback",
+    (pins) => {
+      const index = pins.findIndex((pin) => pin.id === pinId);
+      if (index < 0) {
+        throw new AuditPinConflictError("Pin changed while updating feedback; please retry");
+      }
+      if (pins[index].feedback === newFeedback) {
+        return { kind: "noop", result: pins[index] };
+      }
+      const next = [...pins];
+      next[index] = { ...next[index], feedback: newFeedback };
+      return { kind: "write", next, result: next[index] };
+    }
+  );
 }
 
 export async function updatePinReply(
@@ -122,29 +234,35 @@ export async function updatePinReply(
   replyId: string,
   newBody: string
 ): Promise<void> {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
-  if (!audit) throw new Error("Audit not found");
-  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
-  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
-  const loc = findPinLocation(aiPins, userPins, pinId);
-  if (!loc) throw new Error("Pin not found");
+  const bucket = await getPinBucket(auditId, pinId);
+  if (!bucket) throw new Error("Pin not found");
 
-  const bucket = loc.bucket === "pins" ? aiPins : userPins;
-  const next = [...bucket];
-  const pin = { ...next[loc.index] };
-  const replies = [...(pin.replies ?? [])];
-  const ri = replies.findIndex((r) => r.id === replyId);
-  if (ri < 0) throw new Error("Reply not found");
-  replies[ri] = { ...replies[ri], body: newBody };
-  pin.replies = replies;
-  next[loc.index] = pin;
-
-  await prisma.audit.update({
-    where: { id: auditId },
-    data: loc.bucket === "pins"
-      ? { pinsJson: JSON.stringify(next) }
-      : { userPinsJson: JSON.stringify(next) },
-  });
+  await mutatePinColumn(
+    auditId,
+    columnForBucket(bucket),
+    "update pin reply",
+    (pins, context) => {
+      const pinIndex = pins.findIndex((pin) => pin.id === pinId);
+      if (pinIndex < 0) {
+        throw new AuditPinConflictError("Pin changed while updating a reply; please retry");
+      }
+      const replies = [...(pins[pinIndex].replies ?? [])];
+      const replyIndex = replies.findIndex((reply) => reply.id === replyId);
+      if (replyIndex < 0) {
+        if (context.attempt > 0) {
+          throw new AuditPinConflictError("Reply changed concurrently; please retry");
+        }
+        throw new Error("Reply not found");
+      }
+      if (replies[replyIndex].body === newBody) {
+        return { kind: "noop", result: undefined };
+      }
+      replies[replyIndex] = { ...replies[replyIndex], body: newBody };
+      const next = [...pins];
+      next[pinIndex] = { ...next[pinIndex], replies };
+      return { kind: "write", next, result: undefined };
+    }
+  );
 }
 
 export async function deletePinReply(
@@ -152,29 +270,28 @@ export async function deletePinReply(
   pinId: string,
   replyId: string
 ): Promise<void> {
-  const audit = await prisma.audit.findUnique({ where: { id: auditId } });
-  if (!audit) throw new Error("Audit not found");
-  const aiPins = JSON.parse(audit.pinsJson) as Pin[];
-  const userPins = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
-  const loc = findPinLocation(aiPins, userPins, pinId);
-  if (!loc) throw new Error("Pin not found");
+  const bucket = await getPinBucket(auditId, pinId);
+  if (!bucket) throw new Error("Pin not found");
 
-  const bucket = loc.bucket === "pins" ? aiPins : userPins;
-  const next = [...bucket];
-  const pin = { ...next[loc.index] };
-  const replies = [...(pin.replies ?? [])];
-  const ri = replies.findIndex((r) => r.id === replyId);
-  if (ri < 0) throw new Error("Reply not found");
-  replies.splice(ri, 1);
-  pin.replies = replies;
-  next[loc.index] = pin;
-
-  await prisma.audit.update({
-    where: { id: auditId },
-    data: loc.bucket === "pins"
-      ? { pinsJson: JSON.stringify(next) }
-      : { userPinsJson: JSON.stringify(next) },
-  });
+  await mutatePinColumn(
+    auditId,
+    columnForBucket(bucket),
+    "delete pin reply",
+    (pins) => {
+      const pinIndex = pins.findIndex((pin) => pin.id === pinId);
+      if (pinIndex < 0) {
+        throw new AuditPinConflictError("Pin changed while deleting a reply; please retry");
+      }
+      const replies = [...(pins[pinIndex].replies ?? [])];
+      const replyIndex = replies.findIndex((reply) => reply.id === replyId);
+      // Repeating a successful reply delete is an idempotent no-op.
+      if (replyIndex < 0) return { kind: "noop", result: undefined };
+      replies.splice(replyIndex, 1);
+      const next = [...pins];
+      next[pinIndex] = { ...next[pinIndex], replies };
+      return { kind: "write", next, result: undefined };
+    }
+  );
 }
 
 /** Used when reading createdById/shareVisibility/mode so code works even if Prisma client types omit them (e.g. on Vercel). */
@@ -218,6 +335,25 @@ export async function createAudit(input: CreateAuditInput) {
   return audit;
 }
 
+async function ensurePinIdsInColumn(
+  auditId: string,
+  column: PinJsonColumn,
+  initialRaw: string | null
+): Promise<Pin[]> {
+  return mutatePinColumn<Pin[]>(
+    auditId,
+    column,
+    "backfill legacy pin IDs",
+    (pins) => {
+      const result = ensurePinIds(pins);
+      return result.changed
+        ? { kind: "write", next: result.pins, result: result.pins }
+        : { kind: "noop", result: result.pins };
+    },
+    { initialRaw }
+  );
+}
+
 export async function getAuditById(id: string): Promise<AuditWithPins | null> {
   const audit = await prisma.audit.findUnique({
     where: { id },
@@ -229,60 +365,61 @@ export async function getAuditById(id: string): Promise<AuditWithPins | null> {
   `;
   const mode = modeRow?.mode ?? "give_feedback";
 
-  const rawAi = JSON.parse(audit.pinsJson) as Pin[];
-  const rawUser = audit.userPinsJson ? (JSON.parse(audit.userPinsJson) as Pin[]) : [];
-  const aiResult = ensurePinIds(rawAi);
-  const userResult = ensurePinIds(rawUser);
-
-  if (aiResult.changed || userResult.changed) {
-    await prisma.audit.update({
-      where: { id },
-      data: {
-        pinsJson: JSON.stringify(aiResult.pins),
-        userPinsJson: JSON.stringify(userResult.pins),
-      },
-    });
-  }
+  // Legacy pin IDs must remain stable across reads, so keep persisting them.
+  // Each independent column is now conditionally updated and retried instead
+  // of rewriting both columns from one stale snapshot.
+  const [pins, userPins] = await Promise.all([
+    ensurePinIdsInColumn(id, "pinsJson", audit.pinsJson),
+    ensurePinIdsInColumn(id, "userPinsJson", audit.userPinsJson),
+  ]);
 
   const { pinsJson, userPinsJson, ...rest } = audit;
+  void pinsJson;
+  void userPinsJson;
   return {
     ...rest,
     mode,
-    pins: aiResult.pins,
-    userPins: userResult.pins,
+    pins,
+    userPins,
   };
 }
 
-export async function addUserPin(auditId: string, pin: Pin) {
+export type AddUserPinResult = {
+  created: boolean;
+  pin: Pin;
+};
+
+export async function addUserPin(
+  auditId: string,
+  pin: Pin
+): Promise<AddUserPinResult> {
   if (!auditId || typeof auditId !== "string") {
     throw new Error("Invalid audit ID");
   }
 
-  const audit = await prisma.audit.findUnique({
-    where: { id: auditId },
-  });
-  
-  if (!audit) {
-    throw new Error(`Audit not found: ${auditId}`);
-  }
-  
-  const existingUserPins = audit.userPinsJson 
-    ? (JSON.parse(audit.userPinsJson) as Pin[])
-    : [];
-  
-  const updatedUserPins = [...existingUserPins, pin];
-  
-  // Ensure where clause has the id
-  const result = await prisma.audit.update({
-    where: { 
-      id: auditId 
-    },
-    data: {
-      userPinsJson: JSON.stringify(updatedUserPins),
-    },
-  });
-  
-  return result;
+  // Generate once, outside the retry loop. Callers that supply a stable ID get
+  // idempotency across whole-request retries as well as internal CAS retries.
+  const stablePin = pin.id ? pin : { ...pin, id: randomUUID() };
+
+  return mutatePinColumn<AddUserPinResult>(
+    auditId,
+    "userPinsJson",
+    "add user pin",
+    (pins) => {
+      const existing = pins.find((candidate) => candidate.id === stablePin.id);
+      if (existing) {
+        return {
+          kind: "noop",
+          result: { created: false, pin: existing },
+        };
+      }
+      return {
+        kind: "write",
+        next: [...pins, stablePin],
+        result: { created: true, pin: stablePin },
+      };
+    }
+  );
 }
 
 export type AuditListItem = {

@@ -68,6 +68,11 @@ export function InlineCommentInput({
   const waveformBarsRef = useRef<(HTMLSpanElement | null)[]>([]);
   const discardRecordingRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
+  const pendingSubmissionRef = useRef<{
+    id: string;
+    fingerprint: string;
+    audioBlob: Blob | null;
+  } | null>(null);
 
   // Reset all state when opened/closed
   useEffect(() => {
@@ -78,6 +83,7 @@ export function InlineCommentInput({
       setRecordingState("idle");
       setMicError(null);
       setSubmitting(false);
+      pendingSubmissionRef.current = null;
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {
       discardRecordingRef.current = true;
@@ -202,10 +208,25 @@ export function InlineCommentInput({
     if (typeof pendingClick.scrollY === "number") pin.scrollY = pendingClick.scrollY;
     if (typeof pendingClick.docX === "number") pin.docX = pendingClick.docX;
     if (typeof pendingClick.docY === "number") pin.docY = pendingClick.docY;
+    const fingerprint = JSON.stringify(pin);
+    const audioBlob = audioAttachment?.blob ?? null;
+    if (
+      !pendingSubmissionRef.current ||
+      pendingSubmissionRef.current.fingerprint !== fingerprint ||
+      pendingSubmissionRef.current.audioBlob !== audioBlob
+    ) {
+      pendingSubmissionRef.current = {
+        id: crypto.randomUUID(),
+        fingerprint,
+        audioBlob,
+      };
+    }
+    pin.id = pendingSubmissionRef.current.id;
     setSubmitting(true);
     setMicError(null);
     try {
       await onSave(pin, audioAttachment ?? undefined);
+      pendingSubmissionRef.current = null;
       setFeedback("");
       setAudioAttachment(null);
     } catch (error) {
