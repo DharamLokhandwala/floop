@@ -26,10 +26,12 @@ A Next.js web application that performs automated UX, SEO, and CRO audits on web
    - **Production (Turso):** set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` instead; the app uses Turso when both are set.
    - `NEXTAUTH_SECRET` - Secret for NextAuth (min 32 characters; use a long random string in production)
    - `NEXTAUTH_URL` - App URL (e.g. `http://localhost:3000` for dev, `https://your-app.vercel.app` for production)
+   - `NEXT_PUBLIC_VIEWER_ORIGIN` - Separate cookie-less origin used only for proxied reviewed websites. For local development use `http://127.0.0.1:3000` while the app uses `http://localhost:3000`. In production, attach a separate hostname such as `https://viewer.example.com` to the same deployment. It must not equal `NEXTAUTH_URL`.
    - `RESEND_API_KEY` - Resend API key for magic-link emails
    - `RESEND_FROM` - (optional) Verified sender email; omit to use Resend’s onboarding domain
    - `ANTHROPIC_API_KEY` - Your Anthropic API key for Claude (optional if AI analysis is off)
-   - `BLOB_READ_WRITE_TOKEN` - Vercel Blob token (required for screenshot uploads in production). Store name used for this app: **website-audit-blob**.
+   - `BLOB_READ_WRITE_TOKEN` - Public Vercel Blob token (required for screenshot uploads in production). Store name used for this app: **website-audit-blob**.
+   - `AUDIO_BLOB_READ_WRITE_TOKEN` - Token for a separate private Vercel Blob store used for submitted voice recordings. Public screenshot storage must not be reused for audio.
      
      To get your Vercel Blob token:
      1. Go to [Vercel Dashboard](https://vercel.com/dashboard/stores)
@@ -59,6 +61,9 @@ A Next.js web application that performs automated UX, SEO, and CRO audits on web
    ```bash
    npm run dev
    ```
+
+   Open the main app at `http://localhost:3000`. The same dev server is reached
+   at `http://127.0.0.1:3000` for the isolated viewer iframe.
 
 ## Deploying with Turso (production)
 

@@ -1,12 +1,16 @@
-import { getAuditById } from "@/lib/audits";
-import { getCurrentUser } from "@/lib/auth";
+import { canViewAudit, getAuditById } from "@/lib/audits";
+import { verifyAuditViewerAccessToken } from "@/lib/audit-viewer-access";
+import { getViewerOriginContext } from "@/lib/viewer-origin-server";
+import { ssrfSafeFetch, SsrfBlockedError } from "@/lib/ssrf";
+import { USABLE_ELEMENT_ID_PATTERN } from "@/lib/element-selector";
 import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_PROTOCOLS = ["https:", "http:"];
 
 /**
  * Proxies the audit's live website and injects the comment overlay script.
- * GET /audit/[id]/view?path=/about -> fetches audit.url + path, rewrites links, injects script.
+ * GET /audit/[id]/view?viewerToken=...&path=/about fetches audit.url + path,
+ * rewrites links, and injects the viewer script after validating access.
  *
  * All sub-resource URLs (JS, CSS, fonts, images) pointing to the target origin
  * are rewritten to go through /audit/[id]/asset/â€¦ so the browser never makes
@@ -16,7 +20,27 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  let originContext;
+  try {
+    originContext = getViewerOriginContext(request);
+  } catch (error) {
+    console.error("Viewer origin configuration error:", error);
+    return new NextResponse("Viewer origin is not configured safely", { status: 503 });
+  }
+  if (!originContext) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const { id } = await context.params;
+  const viewerToken = request.nextUrl.searchParams.get("viewerToken");
+  if (!viewerToken) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  const viewerAccess = verifyAuditViewerAccessToken(viewerToken, id);
+  if (!viewerAccess || !(await canViewAudit(id, viewerAccess.userId))) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const audit = await getAuditById(id);
   if (!audit) {
     return new NextResponse("Audit not found", { status: 404 });
@@ -58,31 +82,33 @@ export async function GET(
       "Sec-Fetch-User": "?1",
       "Upgrade-Insecure-Requests": "1",
     },
-    redirect: "follow" as RequestRedirect,
   };
 
   let html: string;
-  const doFetch = async (signal: AbortSignal) => {
-    const res = await fetch(targetUrl.href, { ...fetchOptions, signal });
-    if (!res.ok) return { ok: false as const, status: res.status };
-    const text = await res.text();
-    return { ok: true as const, html: text };
+  const doFetch = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    try {
+      const res = await ssrfSafeFetch(targetUrl, {
+        ...fetchOptions,
+        maxRedirects: 10,
+        signal: controller.signal,
+      });
+      if (!res.ok) return { ok: false as const, status: res.status };
+      return { ok: true as const, html: res.body.toString("utf8") };
+    } finally {
+      clearTimeout(timeout);
+    }
   };
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45_000);
-    let result = await doFetch(controller.signal);
-    clearTimeout(timeout);
+    let result = await doFetch();
 
     if (!result.ok) {
       const retryable = [403, 503, 502, 429].includes(result.status);
       if (retryable) {
         await new Promise((r) => setTimeout(r, 2000));
-        const c2 = new AbortController();
-        const t2 = setTimeout(() => c2.abort(), 45_000);
-        result = await doFetch(c2.signal);
-        clearTimeout(t2);
+        result = await doFetch();
       }
       if (!result.ok) {
         return new NextResponse(
@@ -94,6 +120,9 @@ export async function GET(
     html = result.ok ? result.html : "";
   } catch (err) {
     console.error("Proxy fetch error:", targetUrl.href, err);
+    if (err instanceof SsrfBlockedError) {
+      return new NextResponse("Target URL is not publicly routable", { status: 403 });
+    }
     const message =
       err instanceof Error && err.name === "AbortError"
         ? "Page took too long to respond"
@@ -101,34 +130,55 @@ export async function GET(
     return new NextResponse(message, { status: 502 });
   }
 
-  const appOrigin = request.nextUrl.origin;
-  const proxyViewBase = `${appOrigin}/audit/${id}/view`;
-  const assetBase = `${appOrigin}/audit/${id}/asset`;
+  const encodedViewerToken = encodeURIComponent(viewerToken);
+  const proxyViewBase = `${originContext.viewerOrigin}/audit/${id}/view?viewerToken=${encodedViewerToken}`;
+  const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset/${encodedViewerToken}`;
 
   // --- Pins for this page --------------------------------------------------
   const targetHref = targetUrl.href.replace(/\/$/, "") || targetUrl.origin + "/";
   const isRootPath = !path || path === "/";
-  const pinsForPage = [...audit.pins, ...audit.userPins].filter(
-    (pin: { pageUrl?: string }) => {
+  const pinsForPage: PinForScript[] = [...audit.pins, ...audit.userPins]
+    .filter((pin: { pageUrl?: string }) => {
       if (pin.pageUrl) {
         const pinUrl =
           (pin.pageUrl as string).replace(/\/$/, "") || targetUrl.origin + "/";
         return pinUrl === targetHref;
       }
       return isRootPath;
-    }
-  );
+    })
+    .map((pin) => ({
+      id: pin.id,
+      x: pin.x,
+      y: pin.y,
+      category: pin.category,
+      feedback: pin.feedback,
+      selector: pin.selector,
+      viewportWidth: pin.viewportWidth,
+      viewportHeight: pin.viewportHeight,
+      scrollX: pin.scrollX,
+      scrollY: pin.scrollY,
+      docX: pin.docX,
+      docY: pin.docY,
+      authorId: pin.authorId,
+      authorName: pin.authorName,
+      replies: pin.replies,
+    }));
 
   // --- Rewrite HTML ---------------------------------------------------------
   // 1. Rewrite <a> navigation links â†’ view proxy
   html = rewriteNavigationLinks(html, targetUrl.href, auditOrigin, proxyViewBase);
   // 2. Rewrite full-origin and absolute-path sub-resource URLs â†’ asset proxy
-  html = rewriteResourceUrls(html, auditOrigin, assetBase, proxyViewBase, id);
+  html = rewriteResourceUrls(html, auditOrigin, assetBase, proxyViewBase);
   // 3. Strip attributes that trigger CORS or SRI failures on proxied content
   html = stripCorsAttributes(html);
 
   // 4. Inject <base> pointing at asset proxy so relative URLs also route through it
-  const historyShim = getHistoryShimScript(auditOrigin, proxyViewBase, assetBase);
+  const historyShim = getHistoryShimScript(
+    auditOrigin,
+    proxyViewBase,
+    assetBase,
+    originContext.appOrigin
+  );
   const baseTag = `<base href="${assetBase}/">`;
   if (/<head\b/i.test(html)) {
     html = html.replace(/<head\b[^>]*>/i, "$&" + historyShim + baseTag);
@@ -136,18 +186,22 @@ export async function GET(
     html = html.replace(/<html\b/i, "<html><head>" + historyShim + baseTag + "</head>");
   }
 
-  const sessionUser = await getCurrentUser();
-  const createdById = audit.createdById ?? null;
-  const viewerAuthenticated = !!sessionUser;
-  const viewerIsOwner = !!(sessionUser && createdById && sessionUser.id === createdById);
-
   // 5. Inject viewer script
-  const viewerScript = getViewerScript(id, targetUrl.href, pinsForPage, {
-    viewerAuthenticated,
-    viewerIsOwner,
-    viewerUserId: sessionUser?.id ?? null,
-    viewerName: sessionUser?.name || sessionUser?.email || null,
-  });
+  const viewerScript = getViewerScript(
+    id,
+    targetUrl.href,
+    pinsForPage,
+    {
+      // The isolated viewer origin intentionally has no application session.
+      // Authenticated mutations remain in the parent app; the iframe is a
+      // rendering/instrumentation surface only.
+      viewerAuthenticated: false,
+      viewerIsOwner: false,
+      viewerUserId: null,
+      viewerName: null,
+    },
+    originContext.appOrigin
+  );
   if (html.includes("</body>")) {
     html = html.replace("</body>", `${viewerScript}</body>`);
   } else {
@@ -157,8 +211,10 @@ export async function GET(
   return new NextResponse(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "X-Frame-Options": "ALLOWALL",
-      "Content-Security-Policy": "frame-ancestors *",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": `frame-ancestors ${originContext.appOrigin}`,
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+      "Referrer-Policy": "no-referrer",
     },
   });
 }
@@ -196,7 +252,7 @@ function rewriteNavigationLinks(
       }
       if (resolved.origin !== allowedOrigin) return match;
       const path = resolved.pathname + resolved.search;
-      const newHref = `${proxyViewBase}?path=${encodeURIComponent(path)}`;
+      const newHref = `${proxyViewBase}&path=${encodeURIComponent(path)}`;
       return `<a ${attrs}href="${newHref}"`;
     }
   );
@@ -213,12 +269,11 @@ function rewriteResourceUrls(
   html: string,
   auditOrigin: string,
   assetBase: string,
-  proxyViewBase: string,
-  auditId: string
+  proxyViewBase: string
 ): string {
   const escaped = auditOrigin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // Asset path prefix without origin: /audit/{id}/asset
-  const assetPathPrefix = `/audit/${auditId}/asset`;
+  const assetPathPrefix = new URL(assetBase).pathname;
 
   // 1) Full-origin refs on resource-like tags: https://origin/â€¦ â†’ assetBase/â€¦
   html = html.replace(
@@ -293,7 +348,7 @@ function rewriteResourceUrls(
     /(<form\s[^>]*?\saction\s*=\s*["'])(\/[^"']*)(["'])/gi,
     (_m, prefix, path, suffix) => {
       if (path.startsWith("//")) return _m;
-      return `${prefix}${proxyViewBase}?path=${encodeURIComponent(path)}${suffix}`;
+      return `${prefix}${proxyViewBase}&path=${encodeURIComponent(path)}${suffix}`;
     }
   );
 
@@ -339,17 +394,20 @@ function stripCorsAttributes(html: string): string {
 function getHistoryShimScript(
   auditOrigin: string,
   proxyViewBase: string,
-  assetBase: string
+  assetBase: string,
+  parentOrigin: string
 ): string {
   const originJson = JSON.stringify(auditOrigin);
   const proxyViewBaseJson = JSON.stringify(proxyViewBase);
   const assetBaseJson = JSON.stringify(assetBase);
+  const parentOriginJson = JSON.stringify(parentOrigin);
 
   return `<script>
 (function(){
   var origin=${originJson};
   var viewBase=${proxyViewBaseJson};
   var assetBase=${assetBaseJson};
+  var parentOrigin=${parentOriginJson};
 
   function rewrite(url){
     if(!url) return url;
@@ -357,7 +415,7 @@ function getHistoryShimScript(
     if(s.indexOf(origin)!==0) return s;
     try{
       var u=new URL(s);
-      return viewBase+'?path='+encodeURIComponent(u.pathname+u.search);
+      return viewBase+'&path='+encodeURIComponent(u.pathname+u.search);
     }catch(e){return s;}
   }
 
@@ -377,7 +435,7 @@ function getHistoryShimScript(
         pageUrl = origin + (p.charAt(0) === '/' ? p : '/' + p);
       }
       if (window.__AUDIT_VIEWER__) window.__AUDIT_VIEWER__.pageUrl = pageUrl;
-      window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
+      window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, parentOrigin);
     } catch (e) {}
   }
 
@@ -448,21 +506,40 @@ function getViewerScript(
   auditId: string,
   pageUrl: string,
   pins: PinForScript[],
-  viewerContext: { viewerAuthenticated: boolean; viewerIsOwner: boolean; viewerUserId: string | null; viewerName: string | null }
+  viewerContext: { viewerAuthenticated: boolean; viewerIsOwner: boolean; viewerUserId: string | null; viewerName: string | null },
+  parentOrigin: string
 ): string {
   const pinsJson = JSON.stringify(pins);
   const vAuth = JSON.stringify(viewerContext.viewerAuthenticated);
   const vOwner = JSON.stringify(viewerContext.viewerIsOwner);
   const vUserId = JSON.stringify(viewerContext.viewerUserId);
   const vName = JSON.stringify(viewerContext.viewerName);
+  const parentOriginJson = JSON.stringify(parentOrigin);
+  const usableElementIdPatternSourceJson = JSON.stringify(
+    USABLE_ELEMENT_ID_PATTERN.source
+  );
   const script = `
 <script>
 window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON.stringify(pageUrl)}, pins: ${pinsJson}, viewerAuthenticated: ${vAuth}, viewerIsOwner: ${vOwner}, viewerUserId: ${vUserId}, viewerName: ${vName} };
 (function() {
+  var parentOrigin = ${parentOriginJson};
+  var usableElementIdPattern = new RegExp(${usableElementIdPatternSourceJson});
+  var parentMessageTypes = {
+    SET_COMMENT_MODE: true,
+    UPDATE_PINS: true,
+    HIGHLIGHT: true,
+    CLEAR_HIGHLIGHT: true,
+    SHOW_TOOLTIP: true,
+    SCROLL_TO: true
+  };
   var commentMode = false;
   var ctrlHeld = false; // tracks whether the modifier key is physically held in this frame
   var hotspotElements = [];
   var categoryColors = { SEO: '#3b82f6', 'Visual Design': '#a855f7', CRO: '#22c55e', Feedback: '#3A3CFF' };
+
+  function postToParent(message) {
+    if (window.parent !== window) window.parent.postMessage(message, parentOrigin);
+  }
 
   /* â”€â”€ Hover highlight overlay for comment mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   var hoverOverlay = null;
@@ -506,9 +583,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     if (document.documentElement) document.documentElement.style.cursor = active ? 'crosshair' : '';
     if (active) createHoverOverlay();
     else hideHoverOverlay();
-    if (window.parent !== window) {
-      window.parent.postMessage({ type: 'CTRL_KEY_STATE', held: active }, '*');
-    }
+    postToParent({ type: 'CTRL_KEY_STATE', held: active });
   }
 
   document.addEventListener('keydown', function(e) {
@@ -1094,7 +1169,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
             cancelHideTooltip();
             if (replyJustPostedSafetyTimer) clearTimeout(replyJustPostedSafetyTimer);
             replyJustPostedSafetyTimer = setTimeout(function() { replyJustPosted = false; replyJustPostedSafetyTimer = null; }, 8000);
-            if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+            postToParent({ type: 'PINS_MUTATED' });
           })
           .catch(function(e) {
             replyBtn.disabled = false;
@@ -1127,7 +1202,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
             .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
             .then(function(x) {
               if (!x.res.ok) throw new Error(x.data.error || 'Failed');
-              if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+              postToParent({ type: 'PINS_MUTATED' });
               hideTooltip();
             })
             .catch(function(e) {
@@ -1178,7 +1253,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
                 if (!x.res.ok) throw new Error(x.data.error || 'Failed');
                 pin.feedback = newText;
                 bubble.innerHTML = escHtml(newText);
-                if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+                postToParent({ type: 'PINS_MUTATED' });
               })
               .catch(function(e) {
                 saveBtn.disabled = false;
@@ -1236,7 +1311,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
                   if (!x.res.ok) throw new Error(x.data.error || 'Failed');
                   reply.body = newBody;
                   bubble.innerHTML = escHtml(newBody);
-                  if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+                  postToParent({ type: 'PINS_MUTATED' });
                 })
                 .catch(function(er) {
                   rSave.disabled = false;
@@ -1280,7 +1355,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
               .then(function(res) { return res.json().then(function(data) { return { res: res, data: data }; }); })
               .then(function(x) {
                 if (!x.res.ok) throw new Error(x.data.error || 'Failed');
-                if (window.parent !== window) window.parent.postMessage({ type: 'PINS_MUTATED' }, '*');
+                postToParent({ type: 'PINS_MUTATED' });
               })
               .catch(function(er) {
                 bar.remove();
@@ -1469,7 +1544,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   function getSelector(el) {
     if (!el || el === document.body || el === document.documentElement) return null;
     if (el.id === 'audit-comment-hover-overlay' || el.id === 'audit-viewer-hotspots' || el.id === 'audit-viewer-tooltip' || el.classList.contains('audit-viewer-hotspot')) return null;
-    if (el.id && /^[a-zA-Z][\\\\w.-]*$/.test(el.id)) return '#' + el.id;
+    if (el.id && usableElementIdPattern.test(el.id)) return '#' + el.id;
     var path = [], e = el;
     while (e && e !== document.body) {
       var tag = e.tagName.toLowerCase();
@@ -1493,6 +1568,30 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
   }
 
   window.addEventListener('message', function(e) {
+    var messageType = e.data && typeof e.data === 'object' && typeof e.data.type === 'string'
+      ? e.data.type
+      : null;
+    var expectedOrigin = e.origin === parentOrigin;
+    var expectedSource = e.source === window.parent;
+
+    if (!expectedOrigin || !expectedSource) {
+      console.warn('[floop viewer] Rejected postMessage from unexpected sender', {
+        origin: e.origin,
+        type: messageType,
+        expectedOrigin: parentOrigin,
+        sourceMatchesParent: expectedSource
+      });
+      return;
+    }
+
+    if (!messageType || !parentMessageTypes[messageType]) {
+      console.warn('[floop viewer] Rejected unexpected parent message', {
+        origin: e.origin,
+        type: messageType
+      });
+      return;
+    }
+
     if (e.data && e.data.type === 'SET_COMMENT_MODE') {
       var newVal = e.data.value;
       // Don't let the parent turn off comment mode if the modifier key is
@@ -1572,7 +1671,7 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     var docY = typeof e.pageY === 'number' ? e.pageY : (window.scrollY + e.clientY);
     var selector = getSelector(target);
     if (window.parent !== window) {
-      window.parent.postMessage({
+      postToParent({
         type: 'AUDIT_VIEWER_CLICK',
         selector: selector,
         x: x, y: y,
@@ -1582,14 +1681,14 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
         viewportHeight: vh,
         scrollX: window.scrollX,
         scrollY: window.scrollY
-      }, '*');
+      });
     }
     hideHoverOverlay();
   }, true);
 
   if (window.parent !== window) {
     var pageUrl = window.__AUDIT_VIEWER__ && window.__AUDIT_VIEWER__.pageUrl ? window.__AUDIT_VIEWER__.pageUrl : window.location.href;
-    window.parent.postMessage({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl }, '*');
+    postToParent({ type: 'AUDIT_VIEWER_READY', pageUrl: pageUrl });
     
     function findScrollInfo() {
       var sc = cachedScrollContainer || findScrollContainer();
@@ -1609,12 +1708,12 @@ window.__AUDIT_VIEWER__ = { auditId: ${JSON.stringify(auditId)}, pageUrl: ${JSON
     
     function sendScrollData() {
       var info = findScrollInfo();
-      window.parent.postMessage({
+      postToParent({
         type: 'AUDIT_SCROLL',
         scrollTop: info.scrollTop,
         scrollHeight: info.scrollHeight,
         clientHeight: info.clientHeight,
-      }, '*');
+      });
     }
     window.addEventListener('scroll', sendScrollData, { passive: true });
     window.addEventListener('resize', sendScrollData, { passive: true });

@@ -2,7 +2,10 @@
 
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { InlineCommentInput } from "@/components/InlineCommentInput";
+import {
+  InlineCommentInput,
+  type PendingAudioAttachment,
+} from "@/components/InlineCommentInput";
 import type { Pin } from "@/types/audit";
 import { Pin as PinIcon, Trash2, X, CornerDownRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -90,11 +93,13 @@ function PinThreadPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [isReplying, setIsReplying] = useState(false);
+  const pendingReplyRef = useRef<{ id: string; body: string } | null>(null);
 
   useEffect(() => {
     setIsReplying(false);
     setReplyBody("");
     setErr(null);
+    pendingReplyRef.current = null;
   }, [pin.id]);
 
   useEffect(() => {
@@ -122,14 +127,22 @@ function PinThreadPanel({
     setErr(null);
     setBusy(true);
     try {
+      if (!pendingReplyRef.current || pendingReplyRef.current.body !== body) {
+        pendingReplyRef.current = { id: crypto.randomUUID(), body };
+      }
       const res = await fetch(`/audit/${auditId}/pin/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ pinId: pin.id, body }),
+        body: JSON.stringify({
+          pinId: pin.id,
+          replyId: pendingReplyRef.current.id,
+          body,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to send reply");
+      pendingReplyRef.current = null;
       setReplyBody("");
       onMutated();
     } catch (e) {
@@ -372,15 +385,15 @@ export function AuditViewer({
     }
   }, [selectedPinIndex, allPins.length]);
 
-  const handleSavePin = useCallback(async (pin: Pin) => {
-    setIsInputOpen(false);
-    setClickPosition(null);
-    setAnchorPosition(null);
+  const handleSavePin = useCallback(async (pin: Pin, audio?: PendingAudioAttachment) => {
     try {
+      const formData = new FormData();
+      formData.append("pin", JSON.stringify(pin));
+      if (audio) formData.append("audio", audio.blob, audio.filename);
+
       const response = await fetch(`/audit/${auditId}/add-pin`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pin),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -396,11 +409,16 @@ export function AuditViewer({
 
       onPinAdded?.(pin);
 
+      setIsInputOpen(false);
+      setClickPosition(null);
+      setAnchorPosition(null);
+
       window.location.reload();
     } catch (error) {
       console.error("Error saving pin:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to save pin. Please try again.";
-      alert(errorMessage);
+      throw error instanceof Error
+        ? error
+        : new Error("Failed to save pin. Please try again.");
     }
   }, [auditId, onPinAdded]);
 

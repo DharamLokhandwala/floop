@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Start a floop review</title>
+    <style>
+      /* Tokens mirrored from the floop Figma spec (node 3902:5060). */
+      :root {
+        --primary: #3a3cff;
+        --primary-hover: #3335e6;
+        --bg-color: #f9fafb;
+        --card-border: #ebeff4;
+        --sub-color: #6d6d6d;
+        --heading: #181818;
+        --outer-border: #f1f1f1;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: #ffffff;
+      }
+      html {
+        /* Keep the host browser from painting a dark canvas behind the popup. */
+        color-scheme: light;
+      }
+      body {
+        width: 350px;
+        padding: 30px;
+        display: flex;
+        flex-direction: column;
+        gap: 60px;
+        align-items: flex-start;
+        border: 1.5px solid var(--outer-border);
+        box-shadow: 5px 4px 20px rgba(55, 55, 55, 0.2);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+        color: var(--heading);
+      }
+      .top {
+        display: flex;
+        flex-direction: column;
+        gap: 30px;
+        align-items: flex-start;
+        width: 100%;
+      }
+      .badge {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 50px;
+        height: 50px;
+        border-radius: 9px;
+        background: var(--primary);
+      }
+      .badge svg {
+        width: 37px;
+        height: 15.144px;
+        display: block;
+      }
+      .body-content {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        align-items: flex-start;
+        width: 100%;
+      }
+      h1 {
+        font-size: 24px;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: -0.48px;
+        color: var(--heading);
+        margin: 0;
+        width: 100%;
+      }
+      .field-block {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: flex-end;
+        width: 100%;
+      }
+      /* Visually hidden, still announced by screen readers. */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 12px;
+        background: var(--bg-color);
+        border: 1.064px solid var(--card-border);
+        border-radius: 12px;
+      }
+      .field-icon {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        color: var(--sub-color);
+      }
+      .url-input {
+        flex: 1 0 0;
+        min-width: 0;
+        width: 100%;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        font-family: inherit;
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--sub-color);
+        text-overflow: ellipsis;
+      }
+      .url-input:focus {
+        outline: none;
+      }
+      .url-input::placeholder {
+        color: var(--sub-color);
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+      }
+      .action {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        font-family: inherit;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--sub-color);
+        cursor: pointer;
+      }
+      .action:hover {
+        color: var(--heading);
+      }
+      .action:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+      .action-icon {
+        position: relative;
+        width: 16px;
+        height: 16px;
+      }
+      .action-icon svg {
+        position: absolute;
+        inset: 0;
+        width: 16px;
+        height: 16px;
+      }
+      /* Matches the specificity of `.action-icon svg` above so the hidden
+         default actually wins instead of losing to it. */
+      .action-icon svg.icon-copy {
+        display: block;
+      }
+      .action-icon svg.icon-check {
+        display: none;
+        color: #22c55e;
+      }
+      #copy.is-copied .icon-copy {
+        display: none;
+      }
+      #copy.is-copied .icon-check {
+        display: block;
+      }
+      #edit svg {
+        width: 16px;
+        height: 16px;
+        display: block;
+      }
+      .note {
+        display: none;
+        width: 100%;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #b45309;
+        background: #fffbeb;
+        border: 1.064px solid #fde68a;
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin: 0;
+      }
+      /* Mirrors the app's default Button variant (components/ui/button.tsx) as
+         used on /dashboard/new: a zinc-900 base with a blurred indigo/purple/pink
+         gradient glow layered behind it, rather than a flat floop-blue fill. */
+      button.primary {
+        position: relative;
+        z-index: 0;
+        overflow: hidden;
+        width: 100%;
+        height: 44px;
+        padding: 0 20px;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        color: #ffffff;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 500;
+        line-height: 1.3;
+        cursor: pointer;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+      }
+      button.primary::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -2;
+        background: #18181b;
+      }
+      button.primary::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: linear-gradient(to right, #6366f1, #a855f7, #ec4899);
+        filter: blur(8px);
+        opacity: 0.4;
+        transition: opacity 500ms;
+      }
+      button.primary:hover:not(:disabled)::before {
+        opacity: 0.8;
+      }
+      button.primary:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+      button.primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <div class="badge">
+        <svg viewBox="0 0 340 140" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="floop">
+          <path d="M69.7471 105.94H55.3242L72.0146 0H86.4385L69.7471 105.94Z" fill="#ffffff"/>
+          <path d="M28.0126 105.941H13.5686V26.6684C13.5686 21.5887 14.5899 17.0463 16.6325 13.0411C18.7723 9.03599 21.8848 5.86118 25.97 3.51671C30.0552 1.17224 35.0644 0 40.9976 0C43.4293 0 45.715 0.244216 47.8549 0.732647C50.092 1.12339 52.1345 1.75835 53.9826 2.63753V16.4113C52.3291 15.3368 50.481 14.5553 48.4384 14.0668C46.4931 13.4807 44.4505 13.1877 42.3107 13.1877C37.9337 13.1877 34.4321 14.2622 31.806 16.4113C29.2771 18.4627 28.0126 21.8817 28.0126 26.6684V105.941ZM53.1072 46.7429H0V34.1414H53.1072V46.7429Z" fill="#ffffff"/>
+          <path d="M126.215 107.706C118.963 107.706 112.447 105.991 106.665 102.561C100.883 99.1312 96.2776 94.5745 92.8478 88.8908C89.418 83.1092 87.7031 76.7396 87.7031 69.782C87.7031 62.8244 89.418 56.5038 92.8478 50.8202C96.2776 45.1365 100.883 40.6288 106.665 37.297C112.447 33.8672 118.963 32.1523 126.215 32.1523C133.466 32.1523 139.983 33.8672 145.765 37.297C151.546 40.6288 156.103 45.1855 159.435 50.9672C162.766 56.6508 164.432 62.9224 164.432 69.782C164.432 76.7396 162.766 83.1092 159.435 88.8908C156.103 94.5745 151.497 99.1312 145.618 102.561C139.836 105.991 133.368 107.706 126.215 107.706ZM126.215 93.8885C130.722 93.8885 134.74 92.8106 138.268 90.6547C141.894 88.4988 144.736 85.608 146.793 81.9822C148.851 78.2585 149.88 74.2407 149.88 69.929C149.88 65.5193 148.851 61.5015 146.793 57.8757C144.736 54.25 141.894 51.3591 138.268 49.2033C134.74 46.9494 130.722 45.8225 126.215 45.8225C121.707 45.8225 117.64 46.9494 114.014 49.2033C110.487 51.3591 107.645 54.25 105.489 57.8757C103.333 61.5015 102.255 65.5193 102.255 69.929C102.255 74.2407 103.333 78.2585 105.489 81.9822C107.645 85.608 110.487 88.4988 114.014 90.6547C117.64 92.8106 121.707 93.8885 126.215 93.8885Z" fill="#ffffff"/>
+          <path d="M213.953 107.706C206.701 107.706 200.185 105.991 194.403 102.561C188.622 99.1312 184.016 94.5745 180.586 88.8908C177.156 83.1092 175.441 76.7396 175.441 69.782C175.441 62.8244 177.156 56.5038 180.586 50.8202C184.016 45.1365 188.622 40.6288 194.403 37.297C200.185 33.8672 206.701 32.1523 213.953 32.1523C221.205 32.1523 227.721 33.8672 233.503 37.297C239.284 40.6288 243.841 45.1855 247.173 50.9672C250.505 56.6508 252.171 62.9224 252.171 69.782C252.171 76.7396 250.505 83.1092 247.173 88.8908C243.841 94.5745 239.235 99.1312 233.356 102.561C227.574 105.991 221.107 107.706 213.953 107.706ZM213.953 93.8885C218.461 93.8885 222.478 92.8106 226.006 90.6547C229.632 88.4988 232.474 85.608 234.532 81.9822C236.59 78.2585 237.619 74.2407 237.619 69.929C237.619 65.5193 236.59 61.5015 234.532 57.8757C232.474 54.25 229.632 51.3591 226.006 49.2033C222.478 46.9494 218.461 45.8225 213.953 45.8225C209.445 45.8225 205.379 46.9494 201.753 49.2033C198.225 51.3591 195.383 54.25 193.227 57.8757C191.071 61.5015 189.993 65.5193 189.993 69.929C189.993 74.2407 191.071 78.2585 193.227 81.9822C195.383 85.608 198.225 88.4988 201.753 90.6547C205.379 92.8106 209.445 93.8885 213.953 93.8885Z" fill="#ffffff"/>
+          <path d="M277.724 139.015H263.172V69.782C263.172 62.6284 264.838 56.2098 268.17 50.5262C271.599 44.8426 276.205 40.3838 281.987 37.15C287.768 33.8182 294.285 32.1523 301.536 32.1523C308.788 32.1523 315.305 33.8672 321.086 37.297C326.868 40.6288 331.425 45.1855 334.756 50.9672C338.088 56.6508 339.754 62.9224 339.754 69.782C339.754 77.0335 338.137 83.5501 334.903 89.3318C331.67 95.0154 327.211 99.5231 321.527 102.855C315.942 106.089 309.474 107.706 302.124 107.706C296.343 107.706 291.002 106.334 286.102 103.59C281.301 100.846 277.43 97.2693 274.49 92.8596C271.648 88.3518 270.227 83.4521 270.227 78.1605L277.724 81.9822V139.015ZM301.536 94.0355C306.044 94.0355 310.062 92.9576 313.59 90.8017C317.215 88.5478 320.057 85.608 322.115 81.9822C324.173 78.2585 325.202 74.2407 325.202 69.929C325.202 65.5193 324.173 61.5015 322.115 57.8757C320.057 54.25 317.215 51.3591 313.59 49.2033C310.062 47.0474 306.044 45.9695 301.536 45.9695C297.029 45.9695 292.962 47.0474 289.336 49.2033C285.808 51.3591 282.967 54.25 280.811 57.8757C278.753 61.5015 277.724 65.5193 277.724 69.929C277.724 74.2407 278.753 78.2585 280.811 81.9822C282.967 85.608 285.808 88.5478 289.336 90.8017C292.962 92.9576 297.029 94.0355 301.536 94.0355Z" fill="#ffffff"/>
+        </svg>
+      </div>
+
+      <div class="body-content">
+        <h1>Pin feedback on the page you're viewing</h1>
+
+        <div class="field-block">
+          <label class="sr-only" for="url">Website URL</label>
+          <div class="field">
+            <svg class="field-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M2.5 10h15M10 2.5c1.9 2.1 2.9 4.7 2.9 7.5s-1 5.4-2.9 7.5c-1.9-2.1-2.9-4.7-2.9-7.5s1-5.4 2.9-7.5Z" stroke="currentColor" stroke-width="1.3"/>
+            </svg>
+            <input
+              class="url-input"
+              id="url"
+              type="url"
+              placeholder="Loading current page…"
+              spellcheck="false"
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="actions">
+            <button type="button" class="action" id="copy">
+              <span class="action-icon" aria-hidden="true">
+                <svg class="icon-copy" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="5.5" y="5.5" width="8" height="8" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
+                  <path d="M2.5 10.5v-6a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="1.2"/>
+                </svg>
+                <svg class="icon-check" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3 8.5 6.2 11.5 13 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span id="copyLabel">Copy</span>
+            </button>
+            <span class="sr-only" id="copyAnnouncement" role="status" aria-live="polite"></span>
+            <button type="button" class="action" id="edit">
+              <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M11.1 2.4a1.4 1.4 0 0 1 2 2L5.3 12.2l-2.7.6.6-2.7 7.9-7.7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+              </svg>
+              Edit
+            </button>
+          </div>
+        </div>
+
+        <p class="note" id="note"></p>
+      </div>
+    </div>
+
+    <button type="button" class="primary" id="start" disabled>start reviewing</button>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

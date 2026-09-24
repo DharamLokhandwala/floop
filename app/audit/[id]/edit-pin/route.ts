@@ -1,4 +1,8 @@
-import { updatePinFeedback, getAuditById } from "@/lib/audits";
+import {
+  updatePinFeedback,
+  getAuditById,
+  isAuditPinConflictError,
+} from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
@@ -43,9 +47,13 @@ export async function POST(
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error editing pin:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to edit pin";
+    const status =
+      isAuditPinConflictError(error) || message === "Pin not found" ? 409 : 500;
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to edit pin" },
-      { status: 500 }
+      { error: message },
+      { status }
     );
   }
 }

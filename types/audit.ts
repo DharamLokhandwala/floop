@@ -22,7 +22,7 @@ export interface Pin {
   selector?: string;
   /** Screenshot of the comment location */
   screenshotUrl?: string;
-  /** Vercel Blob URL of a voice recording attached to this pin */
+  /** Audit-authorized app URL for a private voice recording attached to this pin */
   audioUrl?: string;
   viewportWidth?: number;
   viewportHeight?: number;

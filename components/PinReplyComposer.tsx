@@ -40,11 +40,16 @@ export function PinReplyComposer({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const waveformBarsRef = useRef<(HTMLSpanElement | null)[]>([]);
+  const discardRecordingRef = useRef(false);
+  const transcriptionAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
-      stopStream();
+      discardRecordingRef.current = true;
+      transcriptionAbortRef.current?.abort();
+      stopStream(true);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function stopWaveformLoop() {
@@ -63,11 +68,16 @@ export function PinReplyComposer({
     });
   }
 
-  function stopStream() {
+  function stopStream(discard = false) {
     stopWaveformLoop();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+    const recorder = mediaRecorderRef.current;
+    if (discard && recorder) {
+      discardRecordingRef.current = true;
+      recorder.onstop = null;
+    }
+    if (recorder && recorder.state !== "inactive") {
       try {
-        mediaRecorderRef.current.stop();
+        recorder.stop();
       } catch {
         /* ignore */
       }
@@ -121,7 +131,12 @@ export function PinReplyComposer({
     if (recordingState !== "idle") return;
 
     try {
+      discardRecordingRef.current = false;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (discardRecordingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       chunksRef.current = [];
 
@@ -142,6 +157,11 @@ export function PinReplyComposer({
         stream.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
 
+        if (discardRecordingRef.current) {
+          chunksRef.current = [];
+          return;
+        }
+
         const audioBlob = new Blob(chunksRef.current, {
           type: mimeType || "audio/webm",
         });
@@ -157,12 +177,18 @@ export function PinReplyComposer({
             `recording.${mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "m4a" : "webm"}`
           );
 
+          const controller = new AbortController();
+          transcriptionAbortRef.current = controller;
+
           const res = await fetch(`/audit/${auditId}/transcribe-audio`, {
             method: "POST",
             body: formData,
+            signal: controller.signal,
           });
 
           const data = await res.json();
+
+          if (discardRecordingRef.current) return;
 
           if (!res.ok) {
             throw new Error(data.error || "Transcription failed");
@@ -175,9 +201,12 @@ export function PinReplyComposer({
             setMicError(data.error);
           }
         } catch (err) {
-          setMicError(err instanceof Error ? err.message : "Transcription failed");
+          if (!discardRecordingRef.current && !(err instanceof Error && err.name === "AbortError")) {
+            setMicError(err instanceof Error ? err.message : "Transcription failed");
+          }
         } finally {
-          setRecordingState("idle");
+          transcriptionAbortRef.current = null;
+          if (!discardRecordingRef.current) setRecordingState("idle");
           mediaRecorderRef.current = null;
         }
       };

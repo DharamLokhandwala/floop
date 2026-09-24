@@ -1,4 +1,9 @@
-import { updatePinReply, deletePinReply, getAuditById } from "@/lib/audits";
+import {
+  updatePinReply,
+  deletePinReply,
+  getAuditById,
+  isAuditPinConflictError,
+} from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
@@ -48,9 +53,16 @@ export async function POST(
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error editing reply:", error);
+    const message = error instanceof Error ? error.message : "Failed";
+    const status =
+      isAuditPinConflictError(error) ||
+      message === "Pin not found" ||
+      message === "Reply not found"
+        ? 409
+        : 500;
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed" },
-      { status: 500 }
+      { error: message },
+      { status }
     );
   }
 }
@@ -98,9 +110,12 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting reply:", error);
+    const message = error instanceof Error ? error.message : "Failed";
+    const status =
+      isAuditPinConflictError(error) || message === "Pin not found" ? 409 : 500;
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed" },
-      { status: 500 }
+      { error: message },
+      { status }
     );
   }
 }

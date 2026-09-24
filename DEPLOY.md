@@ -48,7 +48,9 @@ Set these in your hosting dashboard (e.g. Vercel → Project → Settings → En
 | `TURSO_AUTH_TOKEN` | Yes (prod) | Turso auth token. |
 | `NEXTAUTH_URL` | Yes | Your app URL, e.g. `https://your-domain.com`. |
 | `NEXTAUTH_SECRET` | Yes | Random secret for NextAuth (e.g. `openssl rand -base64 32`). |
-| `BLOB_READ_WRITE_TOKEN` | Yes | Vercel Blob token (Dashboard → Storage → Create store → token). Used for screenshots. |
+| `NEXT_PUBLIC_VIEWER_ORIGIN` | Yes | A separate cookie-less hostname, e.g. `https://viewer.your-domain.com`, attached to the same deployment and used only for `/audit/[id]/view` and `/audit/[id]/asset/*`. Must differ from `NEXTAUTH_URL`. |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Public Vercel Blob store token. Used for screenshots and cleanup of legacy public voice recordings. |
+| `AUDIO_BLOB_READ_WRITE_TOKEN` | For voice comments | Token for a separate **private** Vercel Blob store used for submitted voice recordings. |
 | `RESEND_API_KEY` | For email | Resend API key if you use magic-link login or notifications. |
 | `RESEND_FROM` | Optional | From-address for Resend (defaults to Resend’s onboarding address). |
 
@@ -57,9 +59,15 @@ For **Vercel**, add these for **Production** (and optionally Preview if you want
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN`
 - `NEXTAUTH_URL` = `https://your-vercel-domain.vercel.app` (or your custom domain)
+- `NEXT_PUBLIC_VIEWER_ORIGIN` = a second custom domain such as `https://viewer.your-domain.com`; attach it to this deployment but do not use it for login or normal app traffic
 - `NEXTAUTH_SECRET`
 - `BLOB_READ_WRITE_TOKEN`
+- `AUDIO_BLOB_READ_WRITE_TOKEN` (from a separate private Blob store, if voice comments are enabled)
 - `RESEND_API_KEY` (and `RESEND_FROM` if needed)
+
+Voice recordings require a second Vercel Blob store created with **Private**
+access. Copy that store's read-write token into
+`AUDIO_BLOB_READ_WRITE_TOKEN`; do not reuse the public screenshot store.
 
 ---
 

@@ -7,6 +7,7 @@ import { captureScreenshot, captureHeroScreenshot, uploadScreenshotToBlob } from
 import { createAudit, setShareVisibility, setReviewerName } from "@/lib/audits";
 import { getCurrentUser } from "@/lib/auth";
 import { isValidUrl, normalizeUrl, validateGoal } from "@/lib/validation";
+import { resolvePublicHttpUrl, SsrfBlockedError } from "@/lib/ssrf";
 import { v4 } from "uuid";
 import { prisma } from "@/lib/db";
 
@@ -45,6 +46,17 @@ export async function runAudit(
   const user = await getCurrentUser();
   if (!user) {
     return { error: "Sign in to create feedback" };
+  }
+
+  try {
+    await resolvePublicHttpUrl(url);
+  } catch (error) {
+    return {
+      error:
+        error instanceof SsrfBlockedError
+          ? "Enter a publicly accessible website URL"
+          : "Could not resolve that website",
+    };
   }
 
   try {
@@ -126,6 +138,17 @@ export async function runRequestFeedbackLink(
   const user = await getCurrentUser();
   if (!user) {
     return { error: "Sign in to create a feedback link" };
+  }
+
+  try {
+    await resolvePublicHttpUrl(url);
+  } catch (error) {
+    return {
+      error:
+        error instanceof SsrfBlockedError
+          ? "Enter a publicly accessible website URL"
+          : "Could not resolve that website",
+    };
   }
 
   try {

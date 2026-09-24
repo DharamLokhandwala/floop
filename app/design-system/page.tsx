@@ -197,7 +197,7 @@ export default async function DesignSystemPage() {
                     ["Create floop link dropdown", "CreateFloopLinkDropdown.tsx", "Dropdown with two options: 'Request feedback' or 'Give feedback'"],
                     ["Feedback sidebar", "FeedbackSidebar.tsx", "Right-side panel in the audit viewer listing all pins and comments"],
                     ["Floop tip modal", "AuditPageClient.tsx (inline Dialog)", "\"How to add feedback\" onboarding dialog shown to authenticated users arriving at the audit viewer from the dashboard (triggered by ?floopTip=1 query param). Has a Ctrl+click animation and a 'Start flooping' CTA."],
-                    ["Anonymous onboarding overlay", "AuditPageClient.tsx (inline fixed overlay)", "Full-screen Ctrl+click instruction overlay shown to unauthenticated visitors on a public audit before they can interact. Dismissed by clicking 'Start flooping feedback'."],
+            ["Anonymous access", "audit/[id]/page.tsx + AuditPageClient.tsx", "Unauthorized visitors receive a server-rendered sign-in gate with no audit pins. Public request-feedback links remain anonymously accessible and show the Ctrl+click onboarding overlay."],
                     ["Login overlay", "AuditPageClient.tsx (inline fixed overlay)", "Full-screen sign-in wall that blurs the audit viewer when the audit is private and the visitor is not authenticated. Embeds the LoginForm inline."],
                     ["Mobile gate screen", "MobileGate.tsx", "Full-page frosted-glass screen that replaces all non-landing content on viewports narrower than 1024 px. Says 'Built for desktops' — not a modal, it swaps the entire layout."],
                   ].map(([name, file, desc]) => (

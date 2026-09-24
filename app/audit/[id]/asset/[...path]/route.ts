@@ -1,4 +1,7 @@
-import { getAuditById } from "@/lib/audits";
+import { canViewAudit, getAuditById } from "@/lib/audits";
+import { verifyAuditViewerAccessToken } from "@/lib/audit-viewer-access";
+import { ssrfSafeFetch, SsrfBlockedError } from "@/lib/ssrf";
+import { getViewerOriginContext } from "@/lib/viewer-origin-server";
 import { NextRequest, NextResponse } from "next/server";
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -29,21 +32,44 @@ const MIME_BY_EXT: Record<string, string> = {
  * Proxies sub-resources (JS, CSS, fonts, images …) from the audit target
  * origin so the browser never makes cross-origin requests.
  *
- *   GET /audit/[id]/asset/assets/index.js
+ *   GET /audit/[id]/asset/<viewer-token>/assets/index.js
  *   → fetches https://<audit-origin>/assets/index.js and streams it back.
  */
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string; path: string[] }> }
 ) {
+  let originContext;
+  try {
+    originContext = getViewerOriginContext(request);
+  } catch (error) {
+    console.error("Viewer origin configuration error:", error);
+    return new NextResponse("Viewer origin is not configured safely", { status: 503 });
+  }
+  if (!originContext) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const { id, path } = await context.params;
+  const [viewerToken, ...resourceSegments] = path;
+  if (!viewerToken) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  const viewerAccess = verifyAuditViewerAccessToken(viewerToken, id);
+  if (!viewerAccess || !(await canViewAudit(id, viewerAccess.userId))) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  if (resourceSegments.length === 0) {
+    return new NextResponse("Asset path is required", { status: 400 });
+  }
+
   const audit = await getAuditById(id);
   if (!audit) {
     return new NextResponse("Audit not found", { status: 404 });
   }
 
   const auditOrigin = new URL(audit.url).origin;
-  const resourcePath = "/" + path.join("/");
+  const resourcePath = "/" + resourceSegments.join("/");
   const search = request.nextUrl.search;
   const targetUrl = auditOrigin + resourcePath + search;
 
@@ -51,24 +77,29 @@ export async function GET(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
 
-    const upstream = await fetch(targetUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: request.headers.get("accept") ?? "*/*",
-        "Accept-Encoding": "identity",
-        Referer: auditOrigin + "/",
-        "Sec-Ch-Ua":
-          '"Chromium";v="124", "Google Chrome";v="124", "Not_A Brand";v="24"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    const upstream = await (async () => {
+      try {
+        return await ssrfSafeFetch(targetUrl, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            Accept: request.headers.get("accept") ?? "*/*",
+            "Accept-Encoding": "identity",
+            Referer: auditOrigin + "/",
+            "Sec-Ch-Ua":
+              '"Chromium";v="124", "Google Chrome";v="124", "Not_A Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+          },
+          maxRedirects: 10,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+    })();
 
     if (!upstream.ok) {
       return new NextResponse(null, { status: upstream.status });
@@ -80,16 +111,14 @@ export async function GET(
 
     const isCSS = contentType.includes("text/css");
     if (isCSS) {
-      const body = await upstream.arrayBuffer();
-      const appOrigin = request.nextUrl.origin;
-      const assetBase = `${appOrigin}/audit/${id}/asset`;
-      let css = new TextDecoder().decode(body);
+      const assetBase = `${originContext.viewerOrigin}/audit/${id}/asset/${encodeURIComponent(viewerToken)}`;
+      let css = upstream.body.toString("utf8");
       css = rewriteCssUrls(css, auditOrigin, assetBase);
       return new NextResponse(css, {
         headers: {
           "Content-Type": contentType,
-          "Cache-Control": "public, max-age=86400, immutable",
-          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "private, max-age=3600",
+          "Access-Control-Allow-Origin": originContext.viewerOrigin,
         },
       });
     }
@@ -97,17 +126,20 @@ export async function GET(
     // Stream non-HTML (JS, images, fonts, etc.) directly without buffering
     const streamHeaders: Record<string, string> = {
       "Content-Type": contentType,
-      "Cache-Control": "public, max-age=86400, immutable",
-      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "private, max-age=3600",
+      "Access-Control-Allow-Origin": originContext.viewerOrigin,
     };
     if (upstream.headers.get("content-length")) {
       streamHeaders["Content-Length"] = upstream.headers.get("content-length")!;
     }
-    return new NextResponse(upstream.body ?? undefined, {
+    return new NextResponse(new Uint8Array(upstream.body), {
       headers: streamHeaders,
     });
   } catch (err) {
     console.error("Asset proxy error:", targetUrl, err);
+    if (err instanceof SsrfBlockedError) {
+      return new NextResponse("Target URL is not publicly routable", { status: 403 });
+    }
     return new NextResponse(null, { status: 502 });
   }
 }

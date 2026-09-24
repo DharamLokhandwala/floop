@@ -1,7 +1,12 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { InlineCommentInput, type PendingLiveClick } from "@/components/InlineCommentInput";
+import {
+  InlineCommentInput,
+  type PendingAudioAttachment,
+  type PendingLiveClick,
+} from "@/components/InlineCommentInput";
+import { getViewerOrigin } from "@/lib/viewer-origin";
 import type { Pin } from "@/types/audit";
 
 /** Normalize pin's page to path (pathname + search) for comparison with iframe path */
@@ -31,6 +36,18 @@ const CATEGORY_COLORS: Record<string, string> = {
   Feedback: "var(--color-floop-blue)",
 };
 
+const VIEWER_MESSAGE_TYPES = new Set([
+  "AUDIT_VIEWER_CLICK",
+  "AUDIT_SCROLL",
+  "AUDIT_VIEWER_READY",
+  "CTRL_KEY_STATE",
+]);
+
+function getMessageType(data: unknown): string | null {
+  if (!data || typeof data !== "object" || !("type" in data)) return null;
+  return typeof data.type === "string" ? data.type : null;
+}
+
 interface LiveAuditViewProps {
   auditId: string;
   auditUrl: string;
@@ -46,13 +63,15 @@ interface LiveAuditViewProps {
   highlightPinIndexInPage?: number | null;
   /** Called after we've sent HIGHLIGHT so parent can clear selection (one-time, not sticky) */
   onHighlightDone?: () => void;
-  onSavePin: (pin: Pin) => Promise<void>;
+  onSavePin: (pin: Pin, audio?: PendingAudioAttachment) => Promise<void>;
   /** Called after a pin is saved successfully (e.g. to refresh sidebar). No full page reload. */
   onPinSaved?: () => void;
   /** Current path from URL so we can stay on this page after reload */
   initialPath?: string;
   /** Pin to highlight on hover (persistent outline, no scroll, no tooltip) */
   hoverHighlightPin?: Pin | null;
+  /** Short-lived capability for the cookie-less viewer origin. */
+  viewerAccessToken: string;
 }
 
 export function LiveAuditView({
@@ -69,6 +88,7 @@ export function LiveAuditView({
   onPinSaved,
   initialPath = "",
   hoverHighlightPin = null,
+  viewerAccessToken,
 }: LiveAuditViewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [pendingClick, setPendingClick] = useState<PendingLiveClick | null>(null);
@@ -84,6 +104,7 @@ export function LiveAuditView({
   const indicatorRef = useRef<HTMLDivElement>(null);
   const [scrollHeight, setScrollHeight] = useState(0);
   const [clientHeight, setClientHeight] = useState(0);
+  const viewerOrigin = useMemo(() => getViewerOrigin(), []);
 
   const currentPath = useMemo(() => {
     const p = currentPagePath || "/";
@@ -108,9 +129,9 @@ export function LiveAuditView({
 
   const postToIframe = useCallback(
     (data: unknown) => {
-      iframeRef.current?.contentWindow?.postMessage(data, "*");
+      iframeRef.current?.contentWindow?.postMessage(data, viewerOrigin);
     },
-    []
+    [viewerOrigin]
   );
 
   // Send comment mode to iframe
@@ -157,6 +178,29 @@ export function LiveAuditView({
   // Listen for messages from iframe
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      const iframeWindow = iframeRef.current?.contentWindow;
+      const messageType = getMessageType(e.data);
+      const expectedOrigin = e.origin === viewerOrigin;
+      const expectedSource = Boolean(iframeWindow) && e.source === iframeWindow;
+
+      if (!expectedOrigin || !expectedSource) {
+        console.warn("[floop parent] Rejected postMessage from unexpected sender", {
+          origin: e.origin,
+          type: messageType,
+          expectedOrigin: viewerOrigin,
+          sourceMatchesViewer: expectedSource,
+        });
+        return;
+      }
+
+      if (!messageType || !VIEWER_MESSAGE_TYPES.has(messageType)) {
+        console.warn("[floop parent] Rejected unexpected viewer message", {
+          origin: e.origin,
+          type: messageType,
+        });
+        return;
+      }
+
       if (e.data?.type === "AUDIT_VIEWER_CLICK") {
         const clickPayload = {
           x: e.data.x,
@@ -204,13 +248,10 @@ export function LiveAuditView({
       if (e.data?.type === "CTRL_KEY_STATE") {
         onCommentModeChange(e.data.held);
       }
-      if (e.data?.type === "PINS_MUTATED") {
-        onPinSaved?.();
-      }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onCommentModeChange, onPinSaved]);
+  }, [onCommentModeChange, viewerOrigin]);
 
   // When parent asks to highlight a pin: navigate iframe if needed, then send HIGHLIGHT
   useEffect(() => {
@@ -280,17 +321,17 @@ export function LiveAuditView({
     }
   }, [postToIframe, onHighlightDone]);
 
-  const handleSavePin = useCallback(async (pin: Pin) => {
+  const handleSavePin = useCallback(async (pin: Pin, audio?: PendingAudioAttachment) => {
+    await onSavePin(pin, audio);
     setPendingClick(null);
     setModalOpen(false);
     setAnchorPosition(null);
     // Add optimistically so hotspot appears immediately
     setOptimisticPins((prev) => [...prev, pin]);
-    await onSavePin(pin);
     onPinSaved?.();
   }, [onSavePin, onPinSaved]);
 
-  const iframeSrc = `/audit/${auditId}/view?path=${encodeURIComponent(iframeSrcPath || "/")}`;
+  const iframeSrc = `${viewerOrigin}/audit/${auditId}/view?viewerToken=${encodeURIComponent(viewerAccessToken)}&path=${encodeURIComponent(iframeSrcPath || "/")}`;
 
   // Show loading state again when path changes (e.g. user clicked a link in the iframe)
   useEffect(() => {
@@ -316,6 +357,8 @@ export function LiveAuditView({
             className="w-full h-full min-h-[280px] sm:min-h-[400px] block border-0 bg-white"
             onLoad={handleIframeLoad}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            allow="camera 'none'; microphone 'none'; geolocation 'none'"
+            referrerPolicy="no-referrer"
           />
         </div>
 

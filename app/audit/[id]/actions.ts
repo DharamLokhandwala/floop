@@ -2,6 +2,8 @@
 
 import {
   addUserPin as addPinToDb,
+  canViewAudit,
+  isAuditPinConflictError,
   setShareVisibility,
   shareAuditWithEmail,
   setReviewerName as setReviewerNameInDb,
@@ -50,15 +52,24 @@ export async function shareAuditWithUserEmail(
 export async function addUserPin(
   auditId: string,
   pin: Pin
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; conflict?: boolean }> {
+  const user = await getCurrentUser();
+  if (!(await canViewAudit(auditId, user?.id ?? null))) {
+    return { success: false, error: "You do not have access to this audit" };
+  }
   try {
-    await addPinToDb(auditId, pin);
+    // Audio references are server-issued only by the multipart add-pin route.
+    // Do not allow this legacy server action to persist caller-supplied URLs.
+    const safePin = { ...pin };
+    delete safePin.audioUrl;
+    await addPinToDb(auditId, safePin);
     revalidatePath(`/audit/${auditId}`);
     return { success: true };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to add pin",
+      conflict: isAuditPinConflictError(error) || undefined,
     };
   }
 }
